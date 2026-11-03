@@ -148,13 +148,22 @@ class SearchEngine:
         """Multi-tier search: Tavily AI -> DuckDuckGo -> Wikipedia Scholarly."""
         results = []
         if self.tavily_api_key:
-            results = self.search_tavily(query, max_results=max_results)
+            try:
+                results = self.search_tavily(query, max_results=max_results)
+            except Exception:
+                results = []
             
         if not results:
-            results = self.search_duckduckgo(query, max_results=max_results)
+            try:
+                results = self.search_duckduckgo(query, max_results=max_results)
+            except Exception:
+                results = []
 
         if not results:
-            results = self.search_wikipedia(query, max_results=max_results)
+            try:
+                results = self.search_wikipedia(query, max_results=max_results)
+            except Exception:
+                results = []
             
         return results
 

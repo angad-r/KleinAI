@@ -221,16 +221,21 @@ if demo_btn:
             unsafe_allow_html=True
         )
 
-    with st.spinner("Streaming Autonomous Research Pipeline..."):
-        demo_results = KleinResearchAgent.execute_demo_simulation(
-            step_callback=on_demo_step,
-            log_callback=on_demo_log
-        )
-    st.session_state.research_data = demo_results
-    st.session_state.is_researching = False
-    progress_bar.progress(100)
-    st.success("✅ Autonomous Research Pipeline Demo Completed! Artifacts compiled.")
-    st.rerun()
+    try:
+        with st.spinner("Streaming Autonomous Research Pipeline..."):
+            demo_results = KleinResearchAgent.execute_demo_simulation(
+                step_callback=on_demo_step,
+                log_callback=on_demo_log
+            )
+        st.session_state.research_data = demo_results
+        st.session_state.is_researching = False
+        progress_bar.progress(100)
+        st.success("✅ Autonomous Research Pipeline Demo Completed! Artifacts compiled.")
+        st.rerun()
+    except Exception as e:
+        st.session_state.is_researching = False
+        st.error(f"❌ Demo simulation failed with error: {str(e)}")
+        st.exception(e)
 
 # Execution Handler - Live Research Pipeline
 if start_btn:
