@@ -7,7 +7,7 @@ import uuid
 import time
 from typing import Dict, Any, List, Callable, Optional
 
-from core.gemini_client import GeminiClient
+from core.gemini_client import GeminiClient, GeminiAuthError
 from core.tools import ToolRegistry
 from core.pdf_generator import build_pdf_report
 from core.ppt_generator import build_pptx_deck
@@ -43,6 +43,11 @@ class KleinResearchAgent:
                 tool_callback(msg)
             if log_callback:
                 log_callback(msg)
+
+        if not self.gemini_client:
+            raise GeminiAuthError(
+                "Google Gemini API Key is required for live autonomous research. Please configure a valid key in the sidebar or evaluate using '⚡ INSTANT DEMO SIMULATION'."
+            )
 
         # Step 1, 2, 3: Topic Analysis, Plan, Questions & Subtopics
         update_step(1, "Topic Comprehension", f"Analyzing semantic scope and scientific domain for '{topic}'")

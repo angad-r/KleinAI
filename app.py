@@ -16,10 +16,18 @@ from core.config import (
     DEFAULT_GEMINI_MODEL,
     AVAILABLE_MODELS,
     get_gemini_api_key,
-    get_tavily_api_key
+    get_tavily_api_key,
+    mask_api_key
 )
 from core.database import init_db, list_sessions, get_session, delete_session
 from core.researcher import KleinResearchAgent
+from core.gemini_client import (
+    GeminiClient,
+    GeminiAuthError,
+    GeminiRateLimitError,
+    GeminiNetworkError,
+    GeminiModelError
+)
 from core.pdf_generator import build_pdf_report
 from core.ppt_generator import build_pptx_deck
 
@@ -96,6 +104,46 @@ with st.sidebar:
         options=AVAILABLE_MODELS,
         index=AVAILABLE_MODELS.index(DEFAULT_GEMINI_MODEL) if DEFAULT_GEMINI_MODEL in AVAILABLE_MODELS else 0
     )
+    
+    # Settings & API Diagnostics Section
+    st.markdown("---")
+    st.subheader("🔍 Settings & API Diagnostics")
+    
+    is_gemini_configured = bool(gemini_key_input and gemini_key_input.strip())
+    is_tavily_configured = bool(tavily_key_input and tavily_key_input.strip())
+    
+    diag_col1, diag_col2 = st.columns(2)
+    with diag_col1:
+        st.markdown("**Gemini API:**")
+        st.markdown("**Selected Model:**")
+        st.markdown("**Tavily Search:**")
+    with diag_col2:
+        if is_gemini_configured:
+            st.markdown(f"🟢 `Configured`")
+        else:
+            st.markdown("🔴 `Missing`")
+            
+        st.markdown(f"`{selected_model}`")
+        
+        if is_tavily_configured:
+            st.markdown(f"🟢 `Configured`")
+        else:
+            st.markdown("🔵 `DuckDuckGo`")
+
+    with st.expander("🛠️ Connection Diagnostics", expanded=False):
+        st.caption(f"Gemini Key: `{mask_api_key(gemini_key_input)}`")
+        st.caption(f"Tavily Key: `{mask_api_key(tavily_key_input)}`")
+        
+        if st.button("⚡ Test Gemini Connection", key="btn_probe_gemini", use_container_width=True):
+            if not is_gemini_configured:
+                st.warning("⚠️ Enter a Gemini API Key above to run connection test.")
+            else:
+                with st.spinner("Probing Google Gemini endpoint..."):
+                    probe_res = GeminiClient.test_connection(api_key=gemini_key_input, model=selected_model)
+                if probe_res["success"]:
+                    st.success(f"✅ Connection: Success!\n\nVerified Model: `{probe_res['model']}`\nProbe Latency: Validated")
+                else:
+                    st.error(f"❌ Connection: Failed!\n\n{probe_res['message']}")
     
     st.markdown("---")
     st.subheader("📚 Research History")
@@ -240,66 +288,99 @@ if demo_btn:
 
 # Execution Handler - Live Research Pipeline
 if start_btn:
+    clean_gemini_key = get_gemini_api_key(gemini_key_input)
     if not topic_input or not topic_input.strip():
         st.error("⚠️ Please enter a research topic to proceed.")
-    elif not gemini_key_input:
-        st.error("⚠️ Google Gemini API Key is required for live internet research. Please enter it in the left sidebar, or click '⚡ INSTANT DEMO SIMULATION' to evaluate immediately.")
+    elif not clean_gemini_key:
+        st.error(
+            "⚠️ **Google Gemini API Key is missing or invalid.**\n\n"
+            "A valid Gemini API key is required for live internet research. "
+            "Please enter your API key in the left sidebar (free keys available at https://aistudio.google.com/), "
+            "or click **⚡ INSTANT DEMO SIMULATION** to evaluate immediately without API credentials."
+        )
     else:
-        st.session_state.is_researching = True
-        st.session_state.live_logs = []
+        # Pre-flight credential validation probe
+        with st.spinner("Validating Gemini API credentials & connectivity..."):
+            probe_check = GeminiClient.test_connection(api_key=clean_gemini_key, model=selected_model)
         
-        # UI Placeholders for live progress
-        progress_bar = st.progress(0)
-        status_box = st.empty()
-        log_box = st.empty()
-
-        def on_step_progress(step_idx: int, total: int, title: str, desc: str):
-            pct = int((step_idx / total) * 100)
-            progress_bar.progress(pct)
-            status_box.markdown(f"""
-            <div class="step-card step-card-active">
-                <div style="font-weight: 700; color: #38BDF8; font-size: 0.95rem;">
-                    Step {step_idx}/{total}: {title}
-                </div>
-                <div style="color: #E2E8F0; font-size: 0.85rem; margin-top: 3px;">
-                    {desc}
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-
-        def on_log_message(msg: str):
-            now_str = datetime.now().strftime("%H:%M:%S")
-            st.session_state.live_logs.append(f"[{now_str}] {msg}")
-            recent = st.session_state.live_logs[-8:]
-            log_box.markdown(
-                f'<div class="terminal-box">' + "<br/>".join(recent) + '</div>',
-                unsafe_allow_html=True
-            )
-
-        try:
-            agent = KleinResearchAgent(
-                gemini_api_key=gemini_key_input,
-                tavily_api_key=tavily_key_input,
-                model=selected_model
-            )
-            
-            with st.spinner("Executing Autonomous Research Pipeline..."):
-                results = agent.execute_research(
-                    topic=topic_input.strip(),
-                    step_callback=on_step_progress,
-                    log_callback=on_log_message
+        if not probe_check["success"]:
+            st.error(f"❌ **API Credential Error:** {probe_check['message']}")
+            if probe_check.get("category") == "AUTH_ERROR":
+                st.info(
+                    "💡 **How to resolve:**\n\n"
+                    "1. Open [Google AI Studio](https://aistudio.google.com/) and create a free Gemini API key.\n"
+                    "2. Paste the new key into the **Google Gemini API Key** input in the left sidebar.\n"
+                    "3. Or click **⚡ INSTANT DEMO SIMULATION** above to test the complete 17-step workflow immediately."
                 )
+            elif probe_check.get("category") == "RATE_LIMIT":
+                st.info("💡 **Rate Limit:** Google AI Studio free tier limits requests per minute. Wait 30 seconds or switch model to `gemini-1.5-flash` in the sidebar.")
+        else:
+            st.session_state.is_researching = True
+            st.session_state.live_logs = []
             
-            st.session_state.research_data = results
-            st.session_state.is_researching = False
-            progress_bar.progress(100)
-            st.success("✅ Complete Autonomous Research Workflow Finished! Explore results and exports below.")
-            st.rerun()
-            
-        except Exception as e:
-            st.session_state.is_researching = False
-            st.error(f"❌ Research failed with error: {str(e)}")
-            st.exception(e)
+            # UI Placeholders for live progress
+            progress_bar = st.progress(0)
+            status_box = st.empty()
+            log_box = st.empty()
+
+            def on_step_progress(step_idx: int, total: int, title: str, desc: str):
+                pct = int((step_idx / total) * 100)
+                progress_bar.progress(pct)
+                status_box.markdown(f"""
+                <div class="step-card step-card-active">
+                    <div style="font-weight: 700; color: #38BDF8; font-size: 0.95rem;">
+                        Step {step_idx}/{total}: {title}
+                    </div>
+                    <div style="color: #E2E8F0; font-size: 0.85rem; margin-top: 3px;">
+                        {desc}
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+            def on_log_message(msg: str):
+                now_str = datetime.now().strftime("%H:%M:%S")
+                st.session_state.live_logs.append(f"[{now_str}] {msg}")
+                recent = st.session_state.live_logs[-8:]
+                log_box.markdown(
+                    f'<div class="terminal-box">' + "<br/>".join(recent) + '</div>',
+                    unsafe_allow_html=True
+                )
+
+            try:
+                agent = KleinResearchAgent(
+                    gemini_api_key=clean_gemini_key,
+                    tavily_api_key=tavily_key_input,
+                    model=selected_model
+                )
+                
+                with st.spinner("Executing Autonomous Research Pipeline..."):
+                    results = agent.execute_research(
+                        topic=topic_input.strip(),
+                        step_callback=on_step_progress,
+                        log_callback=on_log_message
+                    )
+                
+                st.session_state.research_data = results
+                st.session_state.is_researching = False
+                progress_bar.progress(100)
+                st.success("✅ Complete Autonomous Research Workflow Finished! Explore results and exports below.")
+                st.rerun()
+                
+            except GeminiAuthError as e:
+                st.session_state.is_researching = False
+                st.error(f"❌ **Authentication Failed:** {str(e)}")
+            except GeminiRateLimitError as e:
+                st.session_state.is_researching = False
+                st.error(f"⚠️ **Rate Limit Exceeded:** {str(e)}")
+            except GeminiNetworkError as e:
+                st.session_state.is_researching = False
+                st.error(f"🌐 **Network Connectivity Error:** {str(e)}")
+            except GeminiModelError as e:
+                st.session_state.is_researching = False
+                st.error(f"⚙️ **Model Configuration Error:** {str(e)}")
+            except Exception as e:
+                st.session_state.is_researching = False
+                st.error(f"❌ Research failed with error: {str(e)}")
 
 # Display Results View
 data = st.session_state.research_data

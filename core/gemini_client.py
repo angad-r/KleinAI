@@ -1,25 +1,139 @@
 """
 Klein AI - Gemini AI Engine
 Uses the official google-genai SDK for all analytical, reasoning, synthesis and report generation tasks.
+Includes strict API credential validation, connection probing, and transient error classification.
 """
 import json
 import re
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from google import genai
 from google.genai import types
+from google.genai import errors
 
-from core.config import DEFAULT_GEMINI_MODEL, get_gemini_api_key
+from core.config import DEFAULT_GEMINI_MODEL, get_gemini_api_key, mask_api_key
+
+class GeminiError(Exception):
+    """Base exception for Gemini client operations."""
+    pass
+
+class GeminiAuthError(GeminiError):
+    """Raised when Gemini API key is missing, invalid, or unauthorized."""
+    pass
+
+class GeminiRateLimitError(GeminiError):
+    """Raised when Gemini API rate limit / quota (429) is exceeded."""
+    pass
+
+class GeminiNetworkError(GeminiError):
+    """Raised on network failure or connection timeout to Google Gemini API."""
+    pass
+
+class GeminiModelError(GeminiError):
+    """Raised when model is invalid, unsupported, or unavailable."""
+    pass
+
+
+def classify_error(err: Exception) -> Tuple[str, str]:
+    """
+    Classifies a Gemini exception into (category, user_friendly_message).
+    Categories: 'AUTH_ERROR', 'RATE_LIMIT', 'NETWORK_ERROR', 'MODEL_ERROR', 'SERVER_ERROR', 'UNKNOWN'
+    Never reveals raw secret API keys in formatted messages.
+    """
+    err_str = str(err).lower()
+    code = getattr(err, "code", None)
+    
+    # 1. Authentication / Invalid Credentials
+    if any(k in err_str for k in [
+        "api key not valid", "api_key_invalid", "invalid_argument",
+        "no api key was provided", "unauthenticated", "permission_denied",
+        "forbidden", "unauthorized"
+    ]) and ("api key" in err_str or "api_key" in err_str or "unauthenticated" in err_str or "permission" in err_str or code in (400, 401, 403)):
+        return (
+            "AUTH_ERROR",
+            "Google Gemini API Key is invalid or unauthorized. Please verify that your key is active and correct in Google AI Studio (https://aistudio.google.com/)."
+        )
+        
+    # 2. Rate Limit / Quota
+    if "429" in err_str or "resource_exhausted" in err_str or "quota" in err_str or code == 429:
+        return (
+            "RATE_LIMIT",
+            "Gemini API rate limit or quota exceeded (429 Resource Exhausted). Please wait a moment before trying again, or select a different model tier."
+        )
+        
+    # 3. Model Not Found / Unsupported
+    if "not found" in err_str or "unsupported model" in err_str or code == 404:
+        return (
+            "MODEL_ERROR",
+            "The selected Gemini model is not supported or not available for this API key tier."
+        )
+        
+    # 4. Network / Connectivity
+    if any(k in err_str for k in ["connection", "timeout", "timed out", "unreachable", "dns", "gaierror", "socket", "network"]):
+        return (
+            "NETWORK_ERROR",
+            "Network connection error communicating with Google Gemini API. Please check your internet connectivity."
+        )
+        
+    # 5. Server Error
+    if "500" in err_str or "503" in err_str or "internal" in err_str or "unavailable" in err_str or (code and code >= 500):
+        return (
+            "SERVER_ERROR",
+            "Google Gemini service is temporarily unavailable or returned a 5xx error. Please retry shortly."
+        )
+        
+    return ("UNKNOWN", f"Gemini API request failed: {str(err)}")
+
 
 class GeminiClient:
     def __init__(self, api_key: Optional[str] = None, model: str = DEFAULT_GEMINI_MODEL):
         self.api_key = get_gemini_api_key(api_key)
         self.model = model or DEFAULT_GEMINI_MODEL
         if not self.api_key:
-            raise ValueError("GEMINI_API_KEY is not configured. Please supply a valid Google Gemini API key.")
+            raise GeminiAuthError("GEMINI_API_KEY is not configured. Please supply a valid Google Gemini API key.")
         self.client = genai.Client(api_key=self.api_key)
 
+    @staticmethod
+    def test_connection(api_key: Optional[str] = None, model: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Validates Gemini API key credentials and model responsiveness with a lightweight probe.
+        Never logs or exposes the actual secret key.
+        """
+        clean_key = get_gemini_api_key(api_key)
+        target_model = model or DEFAULT_GEMINI_MODEL
+        
+        if not clean_key:
+            return {
+                "success": False,
+                "category": "MISSING_KEY",
+                "message": "Gemini API key is missing. Please provide a key in the sidebar or run Instant Demo Simulation.",
+                "model": target_model
+            }
+        
+        try:
+            test_client = genai.Client(api_key=clean_key)
+            resp = test_client.models.generate_content(
+                model=target_model,
+                contents="Respond with 'PONG'.",
+                config=types.GenerateContentConfig(temperature=0.0, max_output_tokens=10)
+            )
+            return {
+                "success": True,
+                "category": "SUCCESS",
+                "message": f"Connected successfully to Google Gemini ({target_model}).",
+                "model": target_model,
+                "probe_response": resp.text.strip() if resp and resp.text else "OK"
+            }
+        except Exception as e:
+            cat, msg = classify_error(e)
+            return {
+                "success": False,
+                "category": cat,
+                "message": msg,
+                "model": target_model
+            }
+
     def _call_model(self, prompt: str, system_instruction: Optional[str] = None, temperature: float = 0.3, max_retries: int = 3) -> str:
-        """Helper to invoke Gemini model with bounded exponential backoff retries and error recovery."""
+        """Helper to invoke Gemini model with bounded exponential backoff retries and fast auth failure."""
         import time
         import random
         config = types.GenerateContentConfig(
@@ -38,16 +152,30 @@ class GeminiClient:
                     return response.text
                 return ""
             except Exception as e:
+                category, friendly_msg = classify_error(e)
+                
+                # Fast fail without retries for unrecoverable authentication & configuration errors
+                if category == "AUTH_ERROR":
+                    print(f"[GeminiClient] Authentication failed on attempt {attempt}: {friendly_msg}")
+                    raise GeminiAuthError(friendly_msg) from e
+                    
+                if category == "MODEL_ERROR":
+                    print(f"[GeminiClient] Model configuration error: {friendly_msg}")
+                    raise GeminiModelError(friendly_msg) from e
+                
                 last_error = e
-                err_str = str(e).lower()
-                # Check for rate limits or transient network errors
+                # Only retry transient errors (rate limit, server 5xx, or network)
                 if attempt < max_retries:
                     backoff = (2 ** attempt) + random.uniform(0.5, 1.5)
-                    print(f"[GeminiClient] Attempt {attempt} failed ({e}). Retrying in {backoff:.1f}s...")
+                    print(f"[GeminiClient] Transient error on attempt {attempt} ({category}). Retrying in {backoff:.1f}s...")
                     time.sleep(backoff)
                 else:
-                    print(f"[GeminiClient] All {max_retries} attempts failed: {e}")
-                    raise last_error
+                    print(f"[GeminiClient] All {max_retries} attempts failed: {friendly_msg}")
+                    if category == "RATE_LIMIT":
+                        raise GeminiRateLimitError(friendly_msg) from last_error
+                    elif category == "NETWORK_ERROR":
+                        raise GeminiNetworkError(friendly_msg) from last_error
+                    raise GeminiError(friendly_msg) from last_error
         return ""
 
     def _extract_json(self, text: str) -> Any:

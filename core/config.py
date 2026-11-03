@@ -32,14 +32,51 @@ MAX_SEARCH_RESULTS_PER_QUERY = 4
 MAX_TOTAL_SOURCES = 8
 MAX_EXTRACT_CHARS = 4500
 
+KNOWN_PLACEHOLDERS = {
+    "aizasy...", "your_gemini_api_key_here", "your_key_here",
+    "tvly-...", "your_tavily_api_key_here"
+}
+
+def clean_api_key(raw_key: str = None) -> str:
+    """Sanitize API keys by stripping whitespace, wrapping quotes, and placeholder values."""
+    if not raw_key:
+        return ""
+    cleaned = str(raw_key).strip()
+    # Strip quotes if wrapped
+    if (cleaned.startswith('"') and cleaned.endswith('"')) or (cleaned.startswith("'") and cleaned.endswith("'")):
+        cleaned = cleaned[1:-1].strip()
+    if cleaned.lower() in KNOWN_PLACEHOLDERS:
+        return ""
+    return cleaned
+
+def mask_api_key(key: str = None) -> str:
+    """Safely mask API key for telemetry and diagnostic displays without exposing secrets."""
+    cleaned = clean_api_key(key)
+    if not cleaned:
+        return "Not Configured"
+    if len(cleaned) <= 8:
+        return "Configured (Invalid Format / Too Short)"
+    return f"{cleaned[:6]}...{cleaned[-4:]} ({len(cleaned)} chars)"
+
 def get_gemini_api_key(runtime_key: str = None) -> str:
-    """Retrieve Gemini API key with priority: runtime parameter > .env > empty string"""
-    if runtime_key and runtime_key.strip():
-        return runtime_key.strip()
-    return os.getenv("GEMINI_API_KEY", "").strip()
+    """Retrieve Gemini API key with priority: runtime parameter > .env (GEMINI_API_KEY or GOOGLE_API_KEY) > empty string"""
+    cleaned_runtime = clean_api_key(runtime_key)
+    if cleaned_runtime:
+        return cleaned_runtime
+    
+    env_gemini = clean_api_key(os.getenv("GEMINI_API_KEY"))
+    if env_gemini:
+        return env_gemini
+        
+    env_google = clean_api_key(os.getenv("GOOGLE_API_KEY"))
+    if env_google:
+        return env_google
+        
+    return ""
 
 def get_tavily_api_key(runtime_key: str = None) -> str:
     """Retrieve Tavily API key with priority: runtime parameter > .env > empty string"""
-    if runtime_key and runtime_key.strip():
-        return runtime_key.strip()
-    return os.getenv("TAVILY_API_KEY", "").strip()
+    cleaned_runtime = clean_api_key(runtime_key)
+    if cleaned_runtime:
+        return cleaned_runtime
+    return clean_api_key(os.getenv("TAVILY_API_KEY"))
