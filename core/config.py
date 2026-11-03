@@ -14,12 +14,14 @@ APP_TAGLINE = "One Topic. Complete Research. Powered by AI."
 APP_VERSION = "1.0.0"
 
 # Default Model Selection
-DEFAULT_GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+DEFAULT_GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-flash-lite-latest")
 AVAILABLE_MODELS = [
+    "gemini-flash-lite-latest",
+    "gemini-flash-latest",
+    "gemini-3.5-flash",
+    "gemini-3.8-flash",
     "gemini-2.5-flash",
-    "gemini-2.5-pro",
-    "gemini-1.5-flash",
-    "gemini-1.5-pro"
+    "gemini-2.5-pro"
 ]
 
 # Database Path
@@ -59,10 +61,9 @@ def mask_api_key(key: str = None) -> str:
     return f"{cleaned[:6]}...{cleaned[-4:]} ({len(cleaned)} chars)"
 
 def get_gemini_api_key(runtime_key: str = None) -> str:
-    """Retrieve Gemini API key with priority: runtime parameter > .env (GEMINI_API_KEY or GOOGLE_API_KEY) > empty string"""
-    cleaned_runtime = clean_api_key(runtime_key)
-    if cleaned_runtime:
-        return cleaned_runtime
+    """Retrieve Gemini API key with priority: explicit runtime parameter > .env (GEMINI_API_KEY or GOOGLE_API_KEY) > empty string"""
+    if runtime_key is not None:
+        return clean_api_key(runtime_key)
     
     env_gemini = clean_api_key(os.getenv("GEMINI_API_KEY"))
     if env_gemini:
@@ -75,8 +76,7 @@ def get_gemini_api_key(runtime_key: str = None) -> str:
     return ""
 
 def get_tavily_api_key(runtime_key: str = None) -> str:
-    """Retrieve Tavily API key with priority: runtime parameter > .env > empty string"""
-    cleaned_runtime = clean_api_key(runtime_key)
-    if cleaned_runtime:
-        return cleaned_runtime
+    """Retrieve Tavily API key with priority: explicit runtime parameter > .env > empty string"""
+    if runtime_key is not None:
+        return clean_api_key(runtime_key)
     return clean_api_key(os.getenv("TAVILY_API_KEY"))
