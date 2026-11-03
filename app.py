@@ -3,6 +3,7 @@ Klein AI - Autonomous Research Agent
 Streamlit Main Web Application Dashboard
 """
 import os
+import re
 import json
 import streamlit as st
 from pathlib import Path
