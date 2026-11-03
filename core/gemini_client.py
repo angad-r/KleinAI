@@ -109,28 +109,50 @@ class GeminiClient:
                 "model": target_model
             }
         
-        try:
-            test_client = genai.Client(api_key=clean_key)
-            resp = test_client.models.generate_content(
-                model=target_model,
-                contents="Respond with 'PONG'.",
-                config=types.GenerateContentConfig(temperature=0.0, max_output_tokens=10)
-            )
-            return {
-                "success": True,
-                "category": "SUCCESS",
-                "message": f"Connected successfully to Google Gemini ({target_model}).",
-                "model": target_model,
-                "probe_response": resp.text.strip() if resp and resp.text else "OK"
-            }
-        except Exception as e:
-            cat, msg = classify_error(e)
-            return {
-                "success": False,
-                "category": cat,
-                "message": msg,
-                "model": target_model
-            }
+        # Try primary target model, with automatic fallback if the model is retired/unavailable
+        models_to_try = [target_model]
+        for fallback_m in ["gemini-flash-lite-latest", "gemini-3.5-flash", "gemini-flash-latest"]:
+            if fallback_m not in models_to_try:
+                models_to_try.append(fallback_m)
+        
+        last_cat = "UNKNOWN"
+        last_msg = ""
+        for m_name in models_to_try:
+            try:
+                test_client = genai.Client(api_key=clean_key)
+                resp = test_client.models.generate_content(
+                    model=m_name,
+                    contents="Respond with 'PONG'.",
+                    config=types.GenerateContentConfig(temperature=0.0, max_output_tokens=10)
+                )
+                return {
+                    "success": True,
+                    "category": "SUCCESS",
+                    "message": f"Connected successfully to Google Gemini ({m_name}).",
+                    "model": m_name,
+                    "probe_response": resp.text.strip() if resp and resp.text else "OK"
+                }
+            except Exception as e:
+                cat, msg = classify_error(e)
+                last_cat = cat
+                last_msg = msg
+                # If it's an invalid key, don't try other models
+                if cat == "AUTH_ERROR":
+                    return {
+                        "success": False,
+                        "category": "AUTH_ERROR",
+                        "message": msg,
+                        "model": target_model
+                    }
+                # If model is not found (404) or unavailable (503), try the next fallback model
+                continue
+                
+        return {
+            "success": False,
+            "category": last_cat,
+            "message": last_msg,
+            "model": target_model
+        }
 
     def _call_model(self, prompt: str, system_instruction: Optional[str] = None, temperature: float = 0.3, max_retries: int = 3) -> str:
         """Helper to invoke Gemini model with bounded exponential backoff retries and fast auth failure."""
@@ -141,10 +163,13 @@ class GeminiClient:
             system_instruction=system_instruction if system_instruction else "You are Klein AI, a world-class autonomous research scientist, software architect, and academic scholar."
         )
         last_error = None
+        current_model = self.model
+        fallback_models = ["gemini-flash-lite-latest", "gemini-3.5-flash", "gemini-flash-latest"]
+
         for attempt in range(1, max_retries + 1):
             try:
                 response = self.client.models.generate_content(
-                    model=self.model,
+                    model=current_model,
                     contents=prompt,
                     config=config
                 )
@@ -154,12 +179,23 @@ class GeminiClient:
             except Exception as e:
                 category, friendly_msg = classify_error(e)
                 
-                # Fast fail without retries for unrecoverable authentication & configuration errors
+                # Fast fail without retries for unrecoverable authentication errors
                 if category == "AUTH_ERROR":
                     print(f"[GeminiClient] Authentication failed on attempt {attempt}: {friendly_msg}")
                     raise GeminiAuthError(friendly_msg) from e
                     
                 if category == "MODEL_ERROR":
+                    # If model is retired or not found, try available fallback models immediately
+                    swapped = False
+                    for fm in fallback_models:
+                        if fm != current_model:
+                            print(f"[GeminiClient] Model '{current_model}' unsupported. Auto-switching to '{fm}'...")
+                            current_model = fm
+                            self.model = fm
+                            swapped = True
+                            break
+                    if swapped:
+                        continue
                     print(f"[GeminiClient] Model configuration error: {friendly_msg}")
                     raise GeminiModelError(friendly_msg) from e
                 

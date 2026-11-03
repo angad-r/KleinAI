@@ -17,11 +17,8 @@ APP_VERSION = "1.0.0"
 DEFAULT_GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-flash-lite-latest")
 AVAILABLE_MODELS = [
     "gemini-flash-lite-latest",
-    "gemini-flash-latest",
     "gemini-3.5-flash",
-    "gemini-3.8-flash",
-    "gemini-2.5-flash",
-    "gemini-2.5-pro"
+    "gemini-flash-latest"
 ]
 
 # Database Path
