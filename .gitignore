@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.env
+klein_research.db
+.streamlit/
+*.log
