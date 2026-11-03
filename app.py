@@ -48,6 +48,8 @@ if "current_step_info" not in st.session_state:
     st.session_state.current_step_info = {"step": 0, "total": 17, "title": "Idle", "desc": "Ready to initiate research"}
 if "live_logs" not in st.session_state:
     st.session_state.live_logs = []
+if "topic_input_box" not in st.session_state:
+    st.session_state["topic_input_box"] = "Impact of Artificial Intelligence on Cybersecurity in Healthcare Systems"
 
 # Sidebar Configuration
 with st.sidebar:
@@ -112,8 +114,12 @@ with st.sidebar:
                         # Re-generate pdf and pptx binaries in memory
                         data_bundle["pdf_bytes"] = build_pdf_report(data_bundle)
                         slides = data_bundle.get("slides_data", [])
-                        if slides:
-                            data_bundle["pptx_bytes"] = build_pptx_deck(data_bundle, slides)
+                        if not slides:
+                            slides = [
+                                {"slide_number": 1, "slide_type": "title", "title": data_bundle.get("topic", "Research Report"), "subtitle": "Loaded from ResearchMate AI Archive", "bullets": []},
+                                {"slide_number": 2, "slide_type": "content", "title": "Executive Summary", "subtitle": "Historical Archive", "bullets": [data_bundle.get("blueprint", {}).get("executive_summary", "")[:200]]}
+                            ]
+                        data_bundle["pptx_bytes"] = build_pptx_deck(data_bundle, slides)
                         st.session_state.research_data = data_bundle
                         st.rerun()
             with col_del:
@@ -152,33 +158,33 @@ st.markdown("##### 🔍 Enter Research Topic")
 
 # Example Preset Buttons
 col_p1, col_p2, col_p3 = st.columns(3)
-preset_topic = None
 with col_p1:
-    if st.button("🏥 AI Cybersecurity in Healthcare"):
-        preset_topic = "Impact of Artificial Intelligence on Cybersecurity in Healthcare"
+    if st.button("🏥 AI Cybersecurity in Healthcare", key="preset_health"):
+        st.session_state["topic_input_box"] = "Impact of Artificial Intelligence on Cybersecurity in Healthcare Systems"
+        st.rerun()
 with col_p2:
-    if st.button("🔐 Quantum ML & Cryptography"):
-        preset_topic = "Quantum Machine Learning Algorithms for Post-Quantum Cryptography"
+    if st.button("🔐 Quantum ML & Cryptography", key="preset_quantum"):
+        st.session_state["topic_input_box"] = "Quantum Machine Learning Algorithms for Post-Quantum Cryptography"
+        st.rerun()
 with col_p3:
-    if st.button("🤖 Autonomous Multi-Agent Systems"):
-        preset_topic = "Autonomous Multi-Agent Systems for Distributed Supply Chain Resilience"
-
-default_input_val = preset_topic if preset_topic else ("Impact of Artificial Intelligence on Cybersecurity in Healthcare" if not st.session_state.research_data else "")
+    if st.button("🤖 Autonomous Multi-Agent Systems", key="preset_agents"):
+        st.session_state["topic_input_box"] = "Autonomous Multi-Agent Systems for Distributed Supply Chain Resilience"
+        st.rerun()
 
 topic_input = st.text_input(
     label="Research Topic",
-    value=default_input_val,
-    placeholder="e.g., Impact of Artificial Intelligence on Cybersecurity in Healthcare",
+    key="topic_input_box",
+    placeholder="e.g., Impact of Artificial Intelligence on Cybersecurity in Healthcare Systems",
     label_visibility="collapsed"
 )
 
 col_run, col_demo, col_clear = st.columns([3, 2, 1])
 with col_run:
-    start_btn = st.button("🚀 START AUTONOMOUS RESEARCH (LIVE)", type="primary", use_container_width=True)
+    start_btn = st.button("🚀 START AUTONOMOUS RESEARCH (LIVE)", type="primary", use_container_width=True, disabled=st.session_state.is_researching)
 with col_demo:
-    demo_btn = st.button("⚡ INSTANT DEMO SIMULATION", use_container_width=True, help="Runs verified 17-step research pipeline with zero API key requirement.")
+    demo_btn = st.button("⚡ INSTANT DEMO SIMULATION", use_container_width=True, disabled=st.session_state.is_researching, help="Runs verified 17-step research pipeline with zero API key requirement.")
 with col_clear:
-    if st.button("🔄 Reset View", use_container_width=True):
+    if st.button("🔄 Reset View", use_container_width=True, disabled=st.session_state.is_researching):
         st.session_state.research_data = None
         st.session_state.live_logs = []
         st.rerun()
@@ -605,6 +611,16 @@ if data:
         
         col_pdf, col_ppt = st.columns(2)
         with col_pdf:
+            # Ensure binaries are available
+            if not pdf_bytes and data:
+                pdf_bytes = build_pdf_report(data)
+                data["pdf_bytes"] = pdf_bytes
+            if not pptx_bytes and data:
+                pptx_bytes = build_pptx_deck(data, data.get("slides_data", []))
+                data["pptx_bytes"] = pptx_bytes
+
+            raw_topic_slug = re.sub(r'[^\w\-_]', '_', blueprint.get('topic_normalized', 'Research_Report')[:28])
+
             st.markdown("""
             <div class="feature-card" style="text-align: center; padding: 24px;">
                 <div style="font-size: 3rem;">📕</div>
@@ -618,9 +634,10 @@ if data:
                 st.download_button(
                     label="📥 Download PDF Whitepaper",
                     data=pdf_bytes,
-                    file_name=f"Klein_Research_{blueprint.get('topic_normalized', 'Report')[:30].replace(' ', '_')}.pdf",
+                    file_name=f"ResearchMate_{raw_topic_slug}.pdf",
                     mime="application/pdf",
-                    use_container_width=True
+                    use_container_width=True,
+                    key="dl_btn_pdf"
                 )
             else:
                 st.warning("PDF generating...")
@@ -639,9 +656,10 @@ if data:
                 st.download_button(
                     label="📥 Download PowerPoint Deck (.pptx)",
                     data=pptx_bytes,
-                    file_name=f"Klein_Presentation_{blueprint.get('topic_normalized', 'Deck')[:30].replace(' ', '_')}.pptx",
+                    file_name=f"ResearchMate_{raw_topic_slug}.pptx",
                     mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                    use_container_width=True
+                    use_container_width=True,
+                    key="dl_btn_pptx"
                 )
             else:
                 st.warning("Presentation generating...")
@@ -652,16 +670,18 @@ if data:
             st.download_button(
                 label="💾 Download Raw Markdown (.md)",
                 data=full_report,
-                file_name=f"Klein_Report_{blueprint.get('topic_normalized', 'Report')[:25].replace(' ', '_')}.md",
+                file_name=f"ResearchMate_{raw_topic_slug}.md",
                 mime="text/markdown",
-                use_container_width=True
+                use_container_width=True,
+                key="dl_btn_md"
             )
         with col_json:
             json_str = json.dumps({k: v for k, v in data.items() if k not in ("pdf_bytes", "pptx_bytes")}, indent=2, ensure_ascii=False)
             st.download_button(
                 label="💾 Download Raw Data Schema (JSON)",
                 data=json_str,
-                file_name="klein_research_data.json",
+                file_name="researchmate_data.json",
                 mime="application/json",
-                use_container_width=True
+                use_container_width=True,
+                key="dl_btn_json"
             )

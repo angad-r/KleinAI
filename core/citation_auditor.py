@@ -39,8 +39,8 @@ class CitationAuditor:
             has_full_content = content_length > 400
             
             # 4. Integrity status tag
-            if is_valid_url and is_academic and has_full_content:
-                status = "VERIFIED: Authoritative Academic"
+            if is_valid_url and is_academic:
+                status = "VERIFIED: Authoritative Academic" if has_full_content else "VERIFIED: Authoritative Academic (Snippet)"
                 badge_color = "#10B981"  # Emerald
             elif is_valid_url and has_full_content:
                 status = "VERIFIED: Independent Web Source"
