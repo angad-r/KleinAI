@@ -28,7 +28,7 @@ class KleinResearchAgent:
         """
         Executes the intelligent autonomous research lifecycle using validated tool invocations.
         """
-        session_id = str(uuid.uuid4())[:8]
+        session_id = str(uuid.uuid4())
         total_steps = 17
 
         def update_step(step_idx: int, title: str, description: str):
@@ -177,14 +177,32 @@ class KleinResearchAgent:
         log_tool_call("generate_report", rep_res.summary, rep_res.execution_time_ms)
         full_report_markdown = rep_res.data if rep_res.success else ""
 
-        # Step 15: Bibliographic Audit & Verification
-        update_step(15, "Citations & Verification", "Auditing source URLs, matching claims, and generating APA/BibTeX bibliography")
+        # Step 15: Bibliographic Audit & Claim-to-Evidence Verification
+        update_step(15, "Citations & Evidence Mapping", "Verifying sources via Crossref/DOI and mapping claims to extracted text passages")
         cit_res = self.tool_registry.execute_tool("audit_citations", sources=sources)
         log_tool_call("audit_citations", cit_res.summary, cit_res.execution_time_ms)
         audited_citations = cit_res.data if cit_res.success else []
 
-        # Step 16: Export PDF Document
-        update_step(16, "PDF Report Compilation", "Rendering ReportLab document with custom layout, tables, and headers")
+        from core.citation_auditor import CitationAuditor
+        key_claims = comparison.get("key_findings", [])
+        claim_evidence = CitationAuditor.map_claims_to_evidence(key_claims, sources)
+
+        # Step 16: Independent Peer Reviewer Agent Evaluation
+        update_step(16, "Independent Peer Review", "Executing independent critique evaluating completeness, evidence rigor, and methodology")
+        rev_res = self.tool_registry.execute_tool(
+            "review_research",
+            topic=topic,
+            blueprint=blueprint,
+            lit_review=lit_review,
+            audited_citations=audited_citations,
+            gaps=gaps,
+            methodology=methodology
+        )
+        log_tool_call("review_research", rev_res.summary, rev_res.execution_time_ms)
+        independent_review = rev_res.data if rev_res.success else {}
+
+        # Step 17: Deliverable Compilation (PDF Whitepaper & 16:9 Slide Deck)
+        update_step(17, "Deliverables Generation", "Rendering ReportLab PDF document and 16:9 PowerPoint presentation deck")
         research_bundle = {
             "id": session_id,
             "topic": topic,
@@ -192,10 +210,12 @@ class KleinResearchAgent:
             "queries": [a["query"] for a in aspects_definition],
             "sources": sources,
             "audited_citations": audited_citations,
+            "claim_evidence_mappings": claim_evidence,
             "comparison": comparison,
             "literature_review": lit_review,
             "research_gaps": gaps,
             "methodology": methodology,
+            "independent_review": independent_review,
             "report_markdown": full_report_markdown,
             "tool_audit_log": [
                 {
@@ -212,8 +232,6 @@ class KleinResearchAgent:
         pdf_bytes = build_pdf_report(research_bundle)
         research_bundle["pdf_bytes"] = pdf_bytes
 
-        # Step 17: PowerPoint Presentation Generation
-        update_step(17, "Presentation Deck Creation", "Designing 16:9 widescreen PowerPoint deck with python-pptx")
         slides_data = self.gemini_client.generate_presentation_deck(
             topic=topic,
             blueprint=blueprint,
@@ -255,7 +273,7 @@ class KleinResearchAgent:
         import copy
         from core.demo_dataset import VERIFIED_DEMO_DATA
         
-        session_id = f"demo-{str(uuid.uuid4())[:6]}"
+        session_id = f"demo-{str(uuid.uuid4())}"
         total_steps = 17
         data = copy.deepcopy(VERIFIED_DEMO_DATA)
         data["id"] = session_id

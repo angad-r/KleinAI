@@ -1,0 +1,130 @@
+"""
+Simulate WSGI environment calls against app.py to verify all endpoints and security headers.
+"""
+import io
+import sys
+import json
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from app import app
+
+def simulate_request(path, method="GET", body=None, headers=None, query_string=""):
+    env = {
+        "REQUEST_METHOD": method,
+        "PATH_INFO": path,
+        "QUERY_STRING": query_string,
+        "REMOTE_ADDR": "127.0.0.1",
+        "wsgi.input": io.BytesIO(body.encode("utf-8") if isinstance(body, str) else (body or b"")),
+        "CONTENT_LENGTH": str(len(body.encode("utf-8")) if isinstance(body, str) else len(body or b"")),
+    }
+    if headers:
+        for k, v in headers.items():
+            header_key = "HTTP_" + k.upper().replace("-", "_")
+            if k.lower() == "content-type":
+                env["CONTENT_TYPE"] = v
+            else:
+                env[header_key] = v
+
+    captured_status = []
+    captured_headers = []
+
+    def start_response(status, response_headers):
+        captured_status.append(status)
+        captured_headers.extend(response_headers)
+
+    response_chunks = app(env, start_response)
+    response_body = b"".join(response_chunks)
+    header_dict = {k: v for k, v in captured_headers}
+
+    return captured_status[0], header_dict, response_body
+
+def run_tests():
+    print("Testing 1: GET / (HTML Landing Page)")
+    status, headers, body = simulate_request("/")
+    assert status == "200 OK", f"Expected 200 OK, got {status}"
+    assert b"<!DOCTYPE html>" in body
+    assert headers.get("X-Content-Type-Options") == "nosniff"
+    assert headers.get("X-Frame-Options") == "DENY"
+    print("  -> Passed!")
+
+    print("Testing 2: GET / with JSON Accept header")
+    status, headers, body = simulate_request("/", headers={"Accept": "application/json"})
+    assert status == "200 OK", f"Expected 200 OK, got {status}"
+    data = json.loads(body.decode("utf-8"))
+    assert data["status"] == "healthy"
+    assert "version" in data
+    print("  -> Passed!")
+
+    print("Testing 3: GET /api/health (Minimal diagnostic check)")
+    status, headers, body = simulate_request("/api/health")
+    assert status == "200 OK"
+    data = json.loads(body.decode("utf-8"))
+    assert data["status"] == "healthy"
+    assert "gemini_configured" in data
+    assert "gemini_masked_key" not in data  # MUST NOT leak masked key
+    assert "tavily_configured" in data
+    print("  -> Passed! (No secret leakage)")
+
+    print("Testing 4: GET /api/demo")
+    status, headers, body = simulate_request("/api/demo")
+    assert status == "200 OK"
+    data = json.loads(body.decode("utf-8"))
+    assert data["success"] is True
+    assert "10.5220/0012937100004508" in str(data)  # authentic DOI in dataset
+    print("  -> Passed!")
+
+    print("Testing 5: GET /api/sessions")
+    status, headers, body = simulate_request("/api/sessions")
+    assert status == "200 OK"
+    data = json.loads(body.decode("utf-8"))
+    assert data["success"] is True
+    assert "sessions" in data
+    print("  -> Passed!")
+
+    print("Testing 6: POST /api/research - Content-Type validation")
+    status, headers, body = simulate_request("/api/research", method="POST", body="hello", headers={"Content-Type": "text/plain"})
+    assert "415" in status
+    print("  -> Passed! (Rejected invalid Content-Type with 415)")
+
+    print("Testing 7: POST /api/research - Short topic validation")
+    status, headers, body = simulate_request("/api/research", method="POST", body=json.dumps({"topic": "a"}), headers={"Content-Type": "application/json"})
+    assert "400" in status
+    print("  -> Passed! (Rejected short topic with 400)")
+
+    print("Testing 8: POST /api/research - Valid asynchronous submission")
+    status, headers, body = simulate_request(
+        "/api/research",
+        method="POST",
+        body=json.dumps({"topic": "Zero-Trust Architecture in Critical Cloud Healthcare", "gemini_api_key": "test_key"}),
+        headers={"Content-Type": "application/json"}
+    )
+    assert "202" in status
+    data = json.loads(body.decode("utf-8"))
+    assert data["success"] is True
+    assert "job_id" in data
+    assert "/api/jobs/" in data["poll_url"]
+    job_id = data["job_id"]
+    print(f"  -> Passed! (Job queued with ID {job_id})")
+
+    print(f"Testing 9: GET /api/jobs/{job_id}")
+    status, headers, body = simulate_request(f"/api/jobs/{job_id}")
+    assert status == "200 OK"
+    data = json.loads(body.decode("utf-8"))
+    assert data["success"] is True
+    assert data["job"]["id"] == job_id
+    assert "status" in data["job"]
+    print("  -> Passed!")
+
+    print("Testing 10: 404 handler with JSON structure")
+    status, headers, body = simulate_request("/api/nonexistent_route")
+    assert "404" in status
+    data = json.loads(body.decode("utf-8"))
+    assert data["error"] == "Not Found"
+    assert "request_id" in data
+    print("  -> Passed!")
+
+    print("\nALL 10 SIMULATION TESTS PASSED!")
+
+if __name__ == "__main__":
+    run_tests()

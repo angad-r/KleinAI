@@ -360,9 +360,35 @@ def build_pdf_report(research_data: Dict[str, Any]) -> bytes:
         story.append(metrics_table)
         story.append(Spacer(1, 14))
 
-    # 10. References & Citations
+    # 10. Independent Peer Review Audit
+    ind_review = research_data.get("independent_review", {})
+    if ind_review:
+        story.append(Paragraph("8. Independent Peer Review & Verification Audit", h1_style))
+        review_data = [
+            [Paragraph("Review Metric", table_header_style), Paragraph("Evaluation Assessment", table_header_style)]
+        ]
+        review_data.append([Paragraph("Completeness Score", table_cell_style), Paragraph(f"<b>{ind_review.get('completeness_score', 'N/A')}</b>", table_cell_style)])
+        review_data.append([Paragraph("Citation Quality Rating", table_cell_style), Paragraph(str(ind_review.get('citation_quality_score', 'N/A')), table_cell_style)])
+        review_data.append([Paragraph("Verified Citations Count", table_cell_style), Paragraph(str(ind_review.get('verified_citations_count', 0)), table_cell_style)])
+        review_data.append([Paragraph("Unsupported Claims", table_cell_style), Paragraph(str(ind_review.get('unsupported_claims_count', 0)), table_cell_style)])
+        review_data.append([Paragraph("Verification Verdict", table_cell_style), Paragraph(f"<b>{ind_review.get('verdict', 'REVIEW_COMPLETE')}</b>", table_cell_style)])
+        if ind_review.get("critique_summary"):
+            review_data.append([Paragraph("Peer Critique Summary", table_cell_style), Paragraph(clean_text_for_pdf(ind_review.get("critique_summary", "")), table_cell_style)])
+
+        rev_table = Table(review_data, colWidths=[170, 334])
+        rev_table.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#0F172A")),
+            ('BOX', (0,0), (-1,-1), 1, colors.HexColor("#CBD5E1")),
+            ('INNERGRID', (0,0), (-1,-1), 0.5, colors.HexColor("#E2E8F0")),
+            ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, colors.HexColor("#F8FAFC")]),
+            ('PADDING', (0,0), (-1,-1), 6),
+        ]))
+        story.append(rev_table)
+        story.append(Spacer(1, 14))
+
+    # 11. References & Citations
     if sources:
-        story.append(Paragraph("8. Verified Bibliographic References & Sources", h1_style))
+        story.append(Paragraph("9. Verified Bibliographic References & Sources", h1_style))
         for idx, s in enumerate(sources, 1):
             title = s.get("title", "Untitled Source")
             url = s.get("url", "")

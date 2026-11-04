@@ -1,8 +1,10 @@
 """
-Klein AI - Configuration and Environment Management
+Klein AI - Configuration and Environment Management (Version 2.0)
+Centralized source of truth for models, credentials, network constraints, and database settings.
 """
 import os
 from pathlib import Path
+from typing import List
 from dotenv import load_dotenv
 
 # Load .env from workspace directory
@@ -10,31 +12,72 @@ ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
 load_dotenv(dotenv_path=ENV_PATH, override=True)
 
 APP_NAME = "Klein AI"
-APP_TAGLINE = "One Topic. Complete Research. Powered by AI."
-APP_VERSION = "1.0.0"
+APP_TAGLINE = "Autonomous Academic Research & Literature Synthesis Platform"
+APP_VERSION = "2.0.0"
 
-# Default Model Selection
-DEFAULT_GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-flash-lite-latest")
-AVAILABLE_MODELS = [
-    "gemini-flash-lite-latest",
-    "gemini-3.5-flash",
-    "gemini-flash-latest"
+# ==============================================================================
+# MODEL CONFIGURATION (SINGLE SOURCE OF TRUTH)
+# ==============================================================================
+# Only officially supported Google Gemini model identifiers
+SUPPORTED_MODELS: List[str] = [
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-1.5-flash",
+    "gemini-1.5-pro"
 ]
 
-# Database Path
+DEFAULT_GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+if DEFAULT_GEMINI_MODEL not in SUPPORTED_MODELS:
+    # Fallback to recommended production default
+    DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
+
+AVAILABLE_MODELS = list(SUPPORTED_MODELS)
+
+# ==============================================================================
+# DATABASE CONFIGURATION
+# ==============================================================================
+# Supports PostgreSQL (via DATABASE_URL in production) or SQLite (for local testing)
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 DB_PATH = Path(__file__).resolve().parent.parent / "klein_research.db"
 
-# Web Scraping Configuration
-DEFAULT_TIMEOUT = 12
-USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
-MAX_SEARCH_RESULTS_PER_QUERY = 4
-MAX_TOTAL_SOURCES = 8
-MAX_EXTRACT_CHARS = 4500
+# ==============================================================================
+# REDIS & BACKGROUND JOB WORKER CONFIGURATION
+# ==============================================================================
+REDIS_URL = os.getenv("REDIS_URL", "").strip()
+MAX_CONCURRENT_JOBS = int(os.getenv("MAX_CONCURRENT_JOBS", "4"))
+JOB_TIMEOUT_SECONDS = int(os.getenv("JOB_TIMEOUT_SECONDS", "300"))
 
+# ==============================================================================
+# WEB SCRAPING & NETWORK SECURITY CONSTRAINTS
+# ==============================================================================
+DEFAULT_TIMEOUT = int(os.getenv("SCRAPE_TIMEOUT", "12"))
+USER_AGENT = "KleinAI-AcademicResearcher/2.0 (+https://github.com/angad-r/KleinAI)"
+MAX_SEARCH_RESULTS_PER_QUERY = 5
+MAX_TOTAL_SOURCES = 10
+MAX_EXTRACT_CHARS = 8000
+MAX_SCRAPE_BYTES = 2 * 1024 * 1024  # 2 MB stream limit
+MAX_REDIRECTS = 5
+ALLOWED_CONTENT_TYPES = {"text/html", "application/xhtml+xml", "application/xml", "text/plain"}
+
+# Request body size limit for WSGI endpoints
+MAX_REQUEST_BODY_BYTES = 64 * 1024  # 64 KB
+MAX_REQUEST_BODY_SIZE = MAX_REQUEST_BODY_BYTES
+
+# CORS Allowed Origins
+DEFAULT_ALLOWED_ORIGINS = "https://kleinai.vercel.app,http://localhost:8501,http://localhost:3000,http://127.0.0.1:8501"
+ALLOWED_ORIGINS = [
+    o.strip()
+    for o in os.getenv("ALLOWED_ORIGINS", DEFAULT_ALLOWED_ORIGINS).split(",")
+    if o.strip()
+]
+
+# ==============================================================================
+# API CREDENTIAL MANAGEMENT & SANITIZATION
+# ==============================================================================
 KNOWN_PLACEHOLDERS = {
     "your_gemini_api_key_here", "your_key_here",
     "your_tavily_api_key_here", "your_api_key_here",
-    "placeholder_key", "sample_key"
+    "placeholder_key", "sample_key", "<your_api_key>"
 }
 
 def clean_api_key(raw_key: str = None) -> str:
@@ -42,7 +85,6 @@ def clean_api_key(raw_key: str = None) -> str:
     if not raw_key:
         return ""
     cleaned = str(raw_key).strip()
-    # Strip quotes if wrapped
     if (cleaned.startswith('"') and cleaned.endswith('"')) or (cleaned.startswith("'") and cleaned.endswith("'")):
         cleaned = cleaned[1:-1].strip()
     if cleaned.lower() in KNOWN_PLACEHOLDERS:
@@ -50,16 +92,15 @@ def clean_api_key(raw_key: str = None) -> str:
     return cleaned
 
 def mask_api_key(key: str = None) -> str:
-    """Safely mask API key for telemetry and diagnostic displays without exposing secrets."""
+    """
+    Safely reports API key status without leaking prefixes, suffixes, lengths, or secrets.
+    Conforms strictly to minimal disclosure security requirements.
+    """
     cleaned = clean_api_key(key)
-    if not cleaned:
-        return "Not Configured"
-    if len(cleaned) <= 8:
-        return "Configured (Invalid Format / Too Short)"
-    return f"{cleaned[:6]}...{cleaned[-4:]} ({len(cleaned)} chars)"
+    return "Configured" if bool(cleaned) else "Not Configured"
 
 def get_gemini_api_key(runtime_key: str = None) -> str:
-    """Retrieve Gemini API key with priority: explicit runtime parameter > .env (GEMINI_API_KEY or GOOGLE_API_KEY) > empty string"""
+    """Retrieve Gemini API key with priority: runtime parameter > .env (GEMINI_API_KEY) > .env (GOOGLE_API_KEY)"""
     if runtime_key is not None:
         return clean_api_key(runtime_key)
     
@@ -74,7 +115,7 @@ def get_gemini_api_key(runtime_key: str = None) -> str:
     return ""
 
 def get_tavily_api_key(runtime_key: str = None) -> str:
-    """Retrieve Tavily API key with priority: explicit runtime parameter > .env > empty string"""
+    """Retrieve Tavily API key with priority: runtime parameter > .env (TAVILY_API_KEY)"""
     if runtime_key is not None:
         return clean_api_key(runtime_key)
     return clean_api_key(os.getenv("TAVILY_API_KEY"))

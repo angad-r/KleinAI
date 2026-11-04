@@ -39,17 +39,13 @@ def test_clean_api_key_quotes_and_whitespace():
 
 
 def test_mask_api_key_security():
-    """Verify raw API keys are never exposed in diagnostics or logs."""
+    """Verify raw API keys are never exposed in diagnostics or logs (Zero-Leakage Policy)."""
     raw = "TEST_DUMMY_SECRET_KEY_1234567890_ABCD"
     masked = mask_api_key(raw)
     assert raw not in masked
-    assert "TEST_D..." in masked
-    assert "...ABCD" in masked
-    assert f"{len(raw)} chars" in masked
-
-    # Missing and short keys
+    assert masked == "Configured"
     assert mask_api_key("") == "Not Configured"
-    assert "Too Short" in mask_api_key("TEST")
+    assert mask_api_key(None) == "Not Configured"
 
 
 # 2. ERROR CLASSIFICATION

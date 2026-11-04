@@ -1,267 +1,221 @@
-# 🔬 Klein AI — Autonomous Research Agent
-> **"One Topic. Complete Research. Powered by AI."**  
-> *Production-Ready Autonomous Scientific Research & Whitepaper Publishing Engine built for College Capstone Project Evaluation.*
+# 🔬 Klein AI 2.0 — Autonomous Scientific Research Agent & SaaS Platform
+> **"One Topic. Complete Research. Verified by Empirical Registries."**  
+> *Production-Ready Autonomous Academic Research Engine & Whitepaper Publishing Platform.*
+
+[![Live Application](https://img.shields.io/badge/Live_Deployment-Vercel-black?style=for-the-badge&logo=vercel)](https://kleinai.vercel.app/)
+[![Python Version](https://img.shields.io/badge/Python-3.11_|_3.12_|_3.13-blue?style=for-the-badge&logo=python)](https://www.python.org/)
+[![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](LICENSE)
+[![Tests Passing](https://img.shields.io/badge/Tests-53%20Passed%20(100%25)-brightgreen?style=for-the-badge&logo=pytest)](TESTING_REPORT.md)
+[![Security Rating](https://img.shields.io/badge/Security-A%2B%20Hardened-indigo?style=for-the-badge&logo=shield)](SECURITY_AUDIT.md)
 
 ---
 
-## 1. Project Title
-**Klein AI (Autonomous Scientific Research Agent & Whitepaper Engine)**  
-*Project Codename: ResearchMate AI | Version 2.0.0*
+## 1. Project Overview & Live Access
+
+- **Live SaaS Deployment:** [https://kleinai.vercel.app/](https://kleinai.vercel.app/)
+- **GitHub Repository:** [https://github.com/angad-r/KleinAI](https://github.com/angad-r/KleinAI)
+- **Version:** `2.0.0 Pro`
+
+**Klein AI 2.0** is an enterprise-grade autonomous scientific research platform that transforms a research question into a publication-standard academic whitepaper, an executive 16:9 presentation deck, and an audited evidence matrix.
+
+Commanding an orchestrated multi-agent state machine, Klein AI crawls empirical literature, negotiates official DOI metadata from **Crossref** and **DOI.org**, maps generated research claims to exact textual evidence, identifies critical research gaps (`GAP-01` to `GAP-04`), formulates novel system architectures, and subjects all findings to an automated **Independent Peer Review Agent**.
 
 ---
 
-## 2. Project Overview
-**Klein AI** is an autonomous AI-powered scientific research assistant that transforms a single research topic into a publication-standard academic whitepaper and a formatted 16:9 PowerPoint presentation deck. Unlike traditional chatbots that simply regurgitate memorized training weights, Klein AI commands a formal Python Tool Registry to crawl the public web, normalize canonical URLs, scrape DOM text, perform multi-source comparative analysis, discover critical research gaps, and formulate novel system architectures and experimental benchmark designs.
+## 2. Core Capabilities & What's New in 2.0
+
+| Feature | Description |
+| :--- | :--- |
+| **17-Stage Multi-Agent Pipeline** | End-to-end investigation with state telemetry, adaptive query expansion, claim verification, and deliverable compilation. |
+| **Crossref & DOI.org Verification** | Resolves real bibliographic metadata via DOI Content Negotiation (`Accept: application/vnd.citationstyles.csl+json`). |
+| **Claim-to-Evidence Mapping** | Maps every synthesized claim to exact source passages with lexical overlap scoring and contradiction detection. |
+| **Universal Database Persistence** | Managed PostgreSQL connection pooling (via `DATABASE_URL` with `psycopg-pool`) in production, with local SQLite fallback and automated migrations. |
+| **Distributed Job Queue** | Asynchronous research execution via `JobManager` with Redis queue support (`REDIS_URL`) and `/api/jobs/<job_id>` progress streaming. |
+| **Independent Peer Review Agent** | Autonomous critic that evaluates synthesized research on factuality, methodology, novelty, strengths, and limitations (1-10 scoring). |
+| **Enterprise Security Hardening** | Strict SSRF defense blocking loopback/private/metadata IPs, strict TLS verification, zero-leakage masking, rate limiting, and security headers. |
+| **Standards-Compliant Exports** | Formatted **APA 7th Edition**, **IEEE**, **BibTeX** (`@misc`), **RIS** (Zotero/EndNote), **ReportLab PDF**, and **python-pptx** decks. |
+| **Linear/Perplexity Dark SaaS UI** | Responsive dark interface with interactive tabs, live terminal progress logs, and instant verified academic demo mode. |
 
 ---
 
-## 3. Problem Statement
-Academic literature review and whitepaper compilation is an arduous, multi-day manual process:
-- Researchers must manually query multiple disjoint repositories (Google Scholar, PubMed, arXiv, IEEE).
-- Over 70% of research time is consumed by boilerplate tasks: parsing web content, extracting metrics, mapping consensus vs contradictions, and formatting citations.
-- Existing general-purpose LLMs hallucinate citations, invent fake papers, and cannot perform autonomous multi-step tool verification without human intervention.
+## 3. System Architecture
 
----
-
-## 4. Objectives
-1. **Full Autonomy:** Enable end-to-end investigation from a single prompt without requiring manual PDF uploads.
-2. **Multi-Aspect Web Investigation:** Query diverse facets including theoretical foundations, empirical benchmarks, adversarial vectors, and compliance standards.
-3. **Cross-Source Comparative Evidence Synthesis:** Generate side-by-side matrices contrasting traditional methods, SOTA AI paradigms, and unresolved trade-offs.
-4. **Research Gap Discovery:** Pinpoint formal gaps (`GAP-01` to `GAP-04`) with explicit severity ratings and strategic research vectors.
-5. **Novel Methodology Proposal:** Propose original architectural frameworks, component hierarchies, and empirical benchmark protocols.
-6. **Publication Deliverables:** Generate downloadable, formatted ReportLab PDF whitepapers and python-pptx 16:9 presentation decks.
-7. **Bibliographic Integrity:** Audit all citations against actual retrieved URLs and generate formal APA 7th edition and BibTeX entries.
-
----
-
-## 5. Main Features
-- **Zero-Manual-Upload Autonomous Research:** Direct crawling of the live web using Tavily AI Search with seamless fallback to DuckDuckGo and Wikipedia.
-- **Formal Tool Registry (`core/tools.py`):** Structured tool-calling engine with execution bounds, parameter verification, and latency logging.
-- **Adaptive Query Expansion:** Automatically triggers secondary targeted searches if initial harvesting yields fewer than 4 authoritative sources.
-- **Canonical URL Deduplication:** Normalizes URLs, strips tracking parameters (`utm_*`, `fbclid`, `ref`), and eliminates duplicates by semantic title hashing.
-- **Source Quality & Authority Scoring:** Rates sources by academic domain authority (`.edu`, `.gov`, `ncbi`, `ieee`) and content depth.
-- **9-Tab Analytical SaaS Dashboard:** Streamlit interface featuring an executive blueprint, comparative matrix, literature review, research gaps, methodology, full paper, audited citations, tool calling audit trail, and export center.
-- **Instant Demo Simulation Mode:** 1-click verified simulation with pre-computed research on *"Impact of Artificial Intelligence on Cybersecurity in Healthcare"*, enabling an instant presentation with real PDF/PPTX downloads even without API keys.
-- **Persistent SQLite Library:** Automatically persists research sessions in `klein_research.db` for instant reload.
-
----
-
-## 6. Technology Stack
-| Category | Component | Description |
-| :--- | :--- | :--- |
-| **Runtime & Language** | Python 3.11+ / 3.13 | Core programming language |
-| **User Interface** | Streamlit | Modern reactive dashboard with custom cyber-academic dark CSS |
-| **Reasoning Model** | Google Gemini API (`google-genai`) | Gemini 2.5 Flash / Pro for planning, synthesis, and paper generation |
-| **Primary Search** | Tavily AI API | Deep academic and technical web search |
-| **Fallback Search 1** | DuckDuckGo (`ddgs`) | Free, zero-config real web search fallback |
-| **Fallback Search 2** | Wikipedia Scholarly API | High-reliability encyclopedic and technical fallback |
-| **DOM Parsing** | BeautifulSoup4 & Requests | HTML sanitization, boilerplate stripping, and clean text extraction |
-| **PDF Engine** | ReportLab | Two-pass `NumberedCanvas` multi-page academic PDF compilation |
-| **Presentation Engine** | `python-pptx` | 16:9 widescreen presentation deck generation |
-| **Persistence** | SQLite3 | Embedded session storage and research library |
-| **Configuration** | `python-dotenv` | Secure environment variable management |
-
----
-
-## 7. System Architecture
 ```mermaid
 flowchart TD
-    subgraph UI["Presentation Layer (Streamlit)"]
-        A["Topic Input & Demo Trigger"]
-        B["9-Tab Analytical Hub"]
-        C["Tool Calling Audit Log"]
-        D["Export Center (PDF & PPTX)"]
+    subgraph UI["Client & Presentation Layer"]
+        Browser["Modern Dark SaaS Interface (app.py)"]
+        StreamlitGUI["Streamlit Desktop Dashboard (port 8501)"]
+        REST_API["REST Endpoints (/api/research, /api/health)"]
     end
 
-    subgraph Agent["Orchestration Layer (core/researcher.py)"]
-        Orch["KleinResearchAgent (17-Step State Machine)"]
-        Adaptive["Adaptive Query Refinement & Deduplication Loop"]
+    subgraph Security["Application Security Gateway"]
+        RateLimit["Rate Limiter (15 req/min Token Bucket)"]
+        Validation["Request Size (64KB) & Content-Type Filter"]
+        SecHeaders["Security Headers (nosniff, DENY, HSTS, CSP)"]
     end
 
-    subgraph Tools["Tool Registry (core/tools.py)"]
-        T_Search["search_web()"]
-        T_Extract["extract_webpage()"]
-        T_Analyse["analyse_source()"]
-        T_Compare["compare_sources()"]
-        T_Review["generate_literature_review()"]
-        T_Gaps["identify_research_gaps()"]
-        T_Method["propose_methodology()"]
-        T_Report["generate_report()"]
-        T_Citations["audit_citations()"]
-        T_Slides["generate_presentation()"]
+    subgraph Queue["Job Orchestration & Telemetry"]
+        JobMgr["JobManager (core/job_queue.py)"]
+        RedisQ["Redis Queue / ThreadPool Worker"]
+        Telemetry["Stage Telemetry & Event Streaming"]
     end
 
-    subgraph External["External Services & Engines"]
-        Gemini["Google Gemini API"]
-        Tavily["Tavily Search"]
-        DDG["DuckDuckGo (ddgs)"]
-        Wiki["Wikipedia API"]
-        BS4["BeautifulSoup4 DOM Scraper"]
+    subgraph Agent["Autonomous Research Pipeline (core/researcher.py)"]
+        Blueprint["Step 1-3: Research Blueprint & Hypothesis"]
+        Harvest["Step 4-7: Multi-Aspect Web Harvester & Deduplication"]
+        Analysis["Step 8-10: Evidence Extraction & Comparative Matrix"]
+        Synthesis["Step 11-14: Literature Review, Gaps & Methodology"]
+        Verification["Step 15: DOI & Crossref Claim-to-Evidence Audit"]
+        PeerReview["Step 16: Independent Critic & Peer Review Agent"]
+        Deliverables["Step 17: PDF Whitepaper & PPTX Deck Compilation"]
     end
 
-    subgraph Storage["Storage & Publishing"]
-        DB[(SQLite: klein_research.db)]
-        PDF["ReportLab PDF Builder"]
-        PPTX["python-pptx Builder"]
+    subgraph External["Authoritative External Registries"]
+        DOI_Org["DOI.org Content Negotiation"]
+        Crossref["Crossref Bibliographic API"]
+        Gemini["Google Gemini 2.5 / 2.0 Flash"]
+        Tavily["Tavily Scholarly Search"]
+        DDG["DuckDuckGo Fallback"]
     end
 
-    A --> Orch
-    Orch --> Adaptive
-    Adaptive --> Tools
-    Tools --> External
-    Tools --> Storage
-    Storage --> B
-    Storage --> C
-    Storage --> D
+    subgraph Storage["Universal Persistence Engine"]
+        PG["Neon / Supabase PostgreSQL (Production)"]
+        SQLite["SQLite Embedded (Local Fallback)"]
+    end
+
+    UI --> Security
+    Security --> Queue
+    Queue --> Agent
+    Agent --> External
+    Agent --> Storage
 ```
 
 ---
 
-## 8. Agent Workflow (17 Autonomous Steps)
-1. **Topic Comprehension:** Analyze semantic domain and scientific ontology.
-2. **Research Planning:** Formulate a 5-phase research milestone roadmap.
-3. **Hypothesis Formulation:** Generate 4 formal research questions ($RQ1-RQ4$) and subtopics.
-4. **Query Generation:** Formulate multi-aspect queries across theory, benchmarks, vulnerabilities, and standards.
-5. **Public Web Search:** Execute crawl across Tavily AI, DuckDuckGo, and Wikipedia.
-6. **Source Collection & Deduplication:** Normalize canonical URLs and eliminate duplicate entries.
-7. **Webpage Content Extraction:** Scrape clean DOM paragraph text via BeautifulSoup4.
-8. **Evidence Analysis:** Extract empirical metrics, detection accuracy, and latency data points.
-9. **Cross-Source Comparison:** Build a multi-dimensional matrix mapping consensus and debates.
-10. **Literature Review:** Synthesize a scholarly literature review with in-text citations.
-11. **Research Gap Identification:** Categorize unresolved challenges (`GAP-01` to `GAP-04`).
-12. **Methodology Formulation:** Propose novel architectural frameworks and component workflows.
-13. **Experimental Design:** Propose quantitative benchmark experiments, baselines, and target metrics.
-14. **Academic Paper Assembly:** Generate a publication-ready academic whitepaper in Markdown.
-15. **Citation & Bibliographic Audit:** Verify all URLs, format APA 7th references, and generate BibTeX entries.
-16. **PDF Report Compilation:** Render a styled ReportLab PDF with headers, tables, and page numbering.
-17. **Presentation Deck Creation:** Generate a 10-slide 16:9 widescreen PowerPoint deck.
+## 4. 17-Stage Research Pipeline Breakdown
 
----
-
-## 9. Folder Structure
 ```
-AI Agent/
-├── .env.example              # Template configuration for API keys
-├── .gitignore                # Protects .env, *.db, *.log, and caches from git
-├── README.md                 # Master project documentation
-├── PROJECT_DOCUMENTATION.md  # Comprehensive project report
-├── SYSTEM_ARCHITECTURE.md    # In-depth architectural specifications
-├── TESTING_REPORT.md         # Detailed test execution report
-├── COLLEGE_PRESENTATION.md   # 12-slide college defense deck and script
-├── requirements.txt          # Python library dependencies
-├── run.bat                   # 1-Click launcher for Windows
-├── test_system.py            # System smoke tests (DB, PDF, PPTX, Search)
-├── test_pipeline.py          # End-to-end data pipeline validator
-├── test_e2e_topic.py         # Formal E2E validation script
-├── app.py                    # Streamlit web application dashboard
-├── assets/
-│   └── style.css             # Cyber-academic dark mode theme
-└── core/
-    ├── __init__.py
-    ├── config.py             # Runtime configuration and environment variables
-    ├── database.py           # SQLite database persistence layer
-    ├── demo_dataset.py       # Pre-computed verified research dataset for live demos
-    ├── gemini_client.py      # Google Gemini client with bounded retry logic
-    ├── search_engine.py      # Multi-tier search engine (Tavily/DDG/Wiki) & BS4 scraper
-    ├── citation_auditor.py   # Citation verification, APA formatting, and BibTeX generator
-    ├── tools.py              # Formal Tool Registry & execution engine
-    ├── researcher.py         # Autonomous 17-step master orchestrator
-    ├── pdf_generator.py      # ReportLab publication-grade PDF generator
-    └── ppt_generator.py      # python-pptx 16:9 presentation deck generator
+[01] Initialize Agent Orchestrator & Load Credentials
+[02] Formulate Scientific Blueprint & Research Questions
+[03] Classify Scientific Domain & Core Hypothesis
+[04] Execute Aspect-Oriented Literature Search Queries
+[05] Harvest Candidate Empirical Sources
+[06] Canonical URL Deduplication & Domain Whitelist Scoring
+[07] Adaptive Query Expansion (Refinement Loop)
+[08] DOM Parsing & Deep Passage Text Extraction
+[09] Extract Empirical Metrics, Baselines & Benchmark Datasets
+[10] Synthesize Cross-Source Comparative Matrix & Divergent Findings
+[11] Author Structured Multi-Section Academic Literature Review
+[12] Discover Structural Research Gaps (GAP-01 to GAP-04)
+[13] Propose Novel Methodology & Framework Architecture
+[14] Design Experimental Verification Protocols & Target Metrics
+[15] Audit Citations against Crossref & DOI.org with Claim Mapping
+[16] Execute Independent Peer Review & Verification Audit
+[17] Compile Academic PDF Whitepaper & PowerPoint Presentation Deck
 ```
 
 ---
 
-## 10. Installation Instructions
+## 5. Quickstart & Local Setup
 
 ### Prerequisites
-- Python 3.11, 3.12, or 3.13 installed.
-- Git (optional, for repository cloning).
+- Python 3.11, 3.12, or 3.13
+- Google Gemini API Key ([Get free key at Google AI Studio](https://aistudio.google.com/))
 
-### Steps
-```powershell
-# 1. Clone or open the workspace directory
-cd "c:\Users\angad\Downloads\AI Agent"
+### Installation
+```bash
+# Clone the repository
+git clone https://github.com/angad-r/KleinAI.git
+cd KleinAI
 
-# 2. Install required dependencies
+# Create virtual environment
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Install production dependencies
 pip install -r requirements.txt
 ```
 
----
-
-## 11. API Key Configuration
-Create a `.env` file in the root workspace directory (copy from `.env.example`) or enter keys directly in the web UI sidebar:
+### Configure Credentials
+Create a `.env` file in the project root:
 ```env
-# Google Gemini API Key (Required for live reasoning - get free key at https://aistudio.google.com/)
 GEMINI_API_KEY=your_gemini_api_key_here
-
-# Tavily AI Search API Key (Optional - get free key at https://tavily.com/)
-# If omitted, DuckDuckGo search is automatically used!
-TAVILY_API_KEY=your_tavily_api_key_here
-
-# Default Model Selection
-GEMINI_MODEL=gemini-flash-lite-latest
+TAVILY_API_KEY=your_tavily_api_key_here  # Optional: falls back to DuckDuckGo
+DATABASE_URL=postgresql://user:pass@ep-cool.neon.tech/neondb?sslmode=require  # Optional: falls back to SQLite
 ```
 
----
-
-## 12. How to Run the Application
-
-### Option A: Double-Click Launcher
-Double-click [`run.bat`](file:///c:/Users/angad/Downloads/AI%20Agent/run.bat) in Windows File Explorer.
-
-### Option B: Terminal Command
-```powershell
+### Launch Interactive Streamlit Desktop Dashboard
+```bash
 streamlit run app.py
 ```
-Open your browser at **`http://localhost:8501`**.
+Open [http://localhost:8501](http://localhost:8501) in your browser.
+
+### Launch Serverless Web Interface Locally
+```bash
+python -m waitress --port=5000 app:app
+```
+Open [http://localhost:5000](http://localhost:5000) in your browser.
 
 ---
 
-## 13. Example Research Workflow
-1. **Input Topic:** Type `"Impact of Artificial Intelligence on Cybersecurity in Healthcare Systems"` or select a preset button.
-2. **Execute:**
-   - Click **`🚀 START AUTONOMOUS RESEARCH (LIVE)`** to run live web research via Gemini and Tavily.
-   - Or click **`⚡ INSTANT DEMO SIMULATION`** to run a verified 17-step demonstration in 4 seconds with zero API key requirement.
-3. **Inspect Tabs:**
-   - **📊 Overview & Plan:** Executive summary and 4 formal research questions ($RQ1-RQ4$).
-   - **⚖️ Comparative Matrix:** Traditional rule IPS vs SOTA neural autoencoders.
-   - **📚 Literature Review:** Synthesized scholarly review with in-text citations.
-   - **🔍 Research Gaps:** Unresolved vulnerabilities (`GAP-01` to `GAP-03`) with severity ratings.
-   - **⚙️ Proposed Methodology:** Novel *Klein-HealthGuard* zero-trust framework and experimental metrics.
-   - **📄 Full Academic Paper:** Scholarly markdown paper ready for review.
-   - **🔗 Sources & Citations:** Audited source cards with APA 7th and BibTeX exports.
-   - **🔧 Tool Execution Audit:** Millisecond execution log of all 17 tool invocations.
-   - **📥 Export Center:** Download the compiled PDF Whitepaper and PowerPoint Deck.
+## 6. REST API Reference
+
+| Method | Endpoint | Description |
+| :--- | :--- | :--- |
+| `GET` | `/api/health` | Minimal operational diagnostics without secret leakage. |
+| `GET` | `/api/demo` | Instant verified academic dataset (zero quota consumption). |
+| `POST` | `/api/research` | Submit research investigation (returns `202 Accepted` + `job_id`). |
+| `GET` | `/api/jobs/<job_id>` | Poll research stage, logs, and completion result. |
+| `GET` | `/api/sessions` | Retrieve persistent research session history. |
+| `GET` | `/api/session?id=<id>` | Retrieve complete session data by UUID. |
+| `GET` | `/api/download/pdf?id=<id>` | Stream formal academic ReportLab PDF report. |
+| `GET` | `/api/download/pptx?id=<id>` | Stream 16:9 widescreen presentation deck. |
+
+### Example Request (`POST /api/research`)
+```bash
+curl -X POST https://kleinai.vercel.app/api/research \
+  -H "Content-Type: application/json" \
+  -d '{"topic": "Zero-Trust Architecture in Critical Cloud Healthcare Systems"}'
+```
+
+Response:
+```json
+{
+  "success": true,
+  "job_id": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
+  "status": "queued",
+  "poll_url": "/api/jobs/9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
+  "message": "Research job submitted successfully. Poll 'poll_url' to track progress."
+}
+```
 
 ---
 
-## 14. Output Files
-- **PDF Report:** `Klein_Research_<Topic>.pdf` (Multi-page document with cover metadata, running headers, two-pass page numbers, tables, and references).
-- **PowerPoint Presentation:** `Klein_Presentation_<Topic>.pptx` (10-slide 16:9 widescreen presentation deck with structured cards).
-- **Markdown Whitepaper:** `Klein_Report_<Topic>.md` (Raw GitHub-flavored markdown).
-- **Session Data:** `klein_research_data.json` (Structured JSON schema).
-- **Persistent Database:** `klein_research.db` (SQLite storage for past runs).
+## 7. Automated Test Suite
+
+Run the full automated test suite (53 tests covering security, persistence, citation validation, deliverables, and REST API):
+
+```bash
+python -m pytest tests/ -v
+```
+
+Output:
+```
+============================= 53 passed in 57.45s =============================
+```
 
 ---
 
-## 15. Limitations
-- **Paywalled Journals:** Papers behind hard institutional paywalls (e.g. non-open-access Elsevier/Springer) can only be analyzed via public abstracts and open-access mirrors.
-- **No Physical Hardware Execution:** The agent designs rigorous experimental setups and benchmarks, but does not train weights on local GPUs.
-- **Search Engine Rate Limits:** If Tavily API quotas are exhausted, public search falls back to DuckDuckGo and Wikipedia.
+## 8. Documentation Index
+
+- [Comprehensive Code Audit (CODE_AUDIT.md)](CODE_AUDIT.md)
+- [Security Hardening & Vulnerability Report (SECURITY_AUDIT.md)](SECURITY_AUDIT.md)
+- [Automated Testing Report (TESTING_REPORT.md)](TESTING_REPORT.md)
+- [Production Deployment Guide (DEPLOYMENT_GUIDE.md)](DEPLOYMENT_GUIDE.md)
+- [Version 2.0.0 Changelog (CHANGELOG.md)](CHANGELOG.md)
 
 ---
 
-## 16. Future Enhancements
-- Integration of direct PubMed / arXiv API PDF stream parsing.
-- Multi-agent adversarial peer review debate mode.
-- Export to native LaTeX `.tex` source bundles with BibTeX `.bib` files.
-- Fine-tuned local model support via Ollama / vLLM.
-
----
-
-## 17. Team Contribution Structure (4-Member Capstone Team)
-- **Member 1 (Lead Systems Architect & Agent Engineer):** Orchestration engine (`core/researcher.py`), formal Tool Registry (`core/tools.py`), and decision loops.
-- **Member 2 (Search Engine & Scraping Specialist):** Web search engine integration (`core/search_engine.py`), Tavily API, DuckDuckGo fallback, and BeautifulSoup4 DOM extraction.
-- **Member 3 (AI Synthesis & Model Engineer):** Google Gemini prompt engineering (`core/gemini_client.py`), comparative matrices, literature reviews, and research gap taxonomies.
-- **Member 4 (UI/UX & Document Publishing Specialist):** Streamlit dashboard (`app.py`), ReportLab PDF engine (`core/pdf_generator.py`), and python-pptx presentation engine (`core/ppt_generator.py`).
+## 9. License & Academic Attribution
+Developed as an autonomous scientific research capstone project. Distributed under the **MIT License**.
+All audited sample literature references authoritative publications via official Digital Object Identifiers (DOIs).
