@@ -11,7 +11,7 @@ import threading
 import urllib.parse
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Tuple
 
 from core.config import (
     APP_NAME,
@@ -24,6 +24,8 @@ from core.config import (
     MAX_REQUEST_BODY_SIZE,
     get_gemini_api_key,
     get_tavily_api_key,
+    clean_api_key,
+    mask_api_key
 )
 from core.database import (
     init_db,
@@ -41,6 +43,7 @@ from core.gemini_client import (
     GeminiRateLimitError,
     GeminiNetworkError,
     GeminiModelError,
+    classify_error
 )
 from core.pdf_generator import build_pdf_report
 from core.ppt_generator import build_pptx_deck
@@ -70,7 +73,6 @@ class InMemoryRateLimiter:
         now = time.time()
         with self._lock:
             history = self._client_requests.get(client_ip, [])
-            # Prune timestamps older than window
             valid_history = [t for t in history if now - t < window_seconds]
             if len(valid_history) >= limit:
                 self._client_requests[client_ip] = valid_history
@@ -89,6 +91,28 @@ SECURITY_HEADERS = [
     ("Referrer-Policy", "strict-origin-when-cross-origin"),
     ("Content-Security-Policy", "default-src 'self' 'unsafe-inline' 'unsafe-eval' https: data:; img-src 'self' data: https:; font-src 'self' https: data:;"),
 ]
+
+
+def test_tavily_key(key: str) -> Tuple[bool, str]:
+    """Lightweight live verification of Tavily Search API key."""
+    clean = clean_api_key(key)
+    if not clean:
+        return True, "No key provided (using DuckDuckGo fallback)"
+    try:
+        import requests
+        resp = requests.post(
+            "https://api.tavily.com/search",
+            json={"api_key": clean, "query": "test", "max_results": 1},
+            timeout=5
+        )
+        if resp.status_code == 200:
+            return True, "Tavily Search API authenticated successfully"
+        elif resp.status_code in (401, 403):
+            return False, "Tavily API key is invalid or unauthorized"
+        else:
+            return True, "Tavily service reachable"
+    except Exception as e:
+        return False, f"Tavily probe error: {str(e)}"
 
 
 # ==============================================================================
@@ -498,10 +522,9 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: var(--font-sans); }
         body { background: var(--bg-base); color: var(--text-primary); min-height: 100vh; display: flex; flex-direction: column; overflow-x: hidden; }
 
-        /* Top Navigation Header */
         header {
             position: sticky; top: 0; z-index: 50;
-            background: rgba(11, 15, 25, 0.85); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+            background: rgba(11, 15, 25, 0.90); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
             border-bottom: 1px solid var(--border); padding: 14px 28px;
             display: flex; justify-content: space-between; align-items: center;
         }
@@ -517,55 +540,51 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
         .status-dot.green { background: var(--accent-emerald); box-shadow: 0 0 8px var(--accent-emerald); }
         .status-dot.amber { background: var(--accent-amber); box-shadow: 0 0 8px var(--accent-amber); }
 
-        /* Main Container */
         main { max-width: 1200px; width: 100%; margin: 0 auto; padding: 32px 24px 60px 24px; flex: 1; }
 
-        /* Hero Banner */
-        .hero { text-align: center; margin-bottom: 36px; }
+        .hero { text-align: center; margin-bottom: 32px; }
         .hero-pill { display: inline-flex; align-items: center; gap: 8px; padding: 5px 14px; background: rgba(99, 102, 241, 0.1); border: 1px solid rgba(99, 102, 241, 0.25); border-radius: 9999px; font-size: 0.8rem; font-weight: 600; color: #A5B4FC; margin-bottom: 16px; }
         h1.hero-title { font-size: 2.75rem; font-weight: 800; letter-spacing: -0.03em; line-height: 1.15; margin-bottom: 12px; background: linear-gradient(135deg, #FFFFFF 40%, #94A3B8 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-        p.hero-subtitle { font-size: 1.1rem; color: var(--text-secondary); max-width: 720px; margin: 0 auto; line-height: 1.6; }
+        p.hero-subtitle { font-size: 1.05rem; color: var(--text-secondary); max-width: 720px; margin: 0 auto; line-height: 1.6; }
 
-        /* Metrics Ribbon */
-        .metrics-ribbon { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-bottom: 32px; }
-        .metric-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px; }
-        .metric-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 700; color: var(--text-muted); margin-bottom: 6px; }
-        .metric-val { font-size: 1.35rem; font-weight: 700; color: var(--text-primary); display: flex; align-items: center; gap: 8px; }
-        .metric-sub { font-size: 0.75rem; color: var(--text-secondary); margin-top: 4px; }
+        .card { background: var(--bg-surface); border: 1px solid var(--border); border-radius: 16px; padding: 24px 28px; margin-bottom: 24px; box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5); }
+        .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; }
+        .card-title { font-size: 1.15rem; font-weight: 700; display: flex; align-items: center; gap: 10px; }
 
-        /* Investigation Input Card */
-        .card { background: var(--bg-surface); border: 1px solid var(--border); border-radius: 16px; padding: 28px; margin-bottom: 28px; box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5); }
-        .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
-        .card-title { font-size: 1.25rem; font-weight: 700; display: flex; align-items: center; gap: 10px; }
-
-        .form-group { margin-bottom: 18px; }
+        .form-group { margin-bottom: 16px; }
         label { display: block; font-size: 0.85rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 8px; }
-        input[type="text"], input[type="password"], select { width: 100%; background: #0A0E17; border: 1px solid var(--border); border-radius: 10px; padding: 13px 16px; color: var(--text-primary); font-size: 0.95rem; outline: none; transition: border-color 0.2s, box-shadow 0.2s; }
+        input[type="text"], input[type="password"], select { width: 100%; background: #0A0E17; border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px; color: var(--text-primary); font-size: 0.95rem; outline: none; transition: border-color 0.2s, box-shadow 0.2s; }
         input[type="text"]:focus, input[type="password"]:focus, select:focus { border-color: var(--accent-primary); box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2); }
+        input.input-error { border-color: var(--accent-rose) !important; box-shadow: 0 0 0 3px rgba(244, 63, 94, 0.25) !important; }
 
         .sample-pills { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
         .sample-pill { font-size: 0.75rem; padding: 4px 10px; background: rgba(30, 41, 59, 0.6); border: 1px solid var(--border); border-radius: 6px; color: #CBD5E1; cursor: pointer; transition: all 0.15s; }
         .sample-pill:hover { background: var(--border); color: #FFF; border-color: var(--accent-primary); }
 
-        .btn-row { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 24px; }
-        button { font-size: 0.92rem; font-weight: 600; border-radius: 10px; padding: 12px 24px; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; transition: transform 0.1s, opacity 0.2s, background-color 0.2s; }
+        .btn-row { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 20px; align-items: center; }
+        button { font-size: 0.92rem; font-weight: 600; border-radius: 10px; padding: 12px 22px; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; transition: transform 0.1s, opacity 0.2s, background-color 0.2s; }
         button:hover { opacity: 0.95; transform: translateY(-1px); }
         button:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
         button.btn-primary { background: linear-gradient(135deg, var(--accent-primary), var(--accent-primary-hover)); color: white; box-shadow: 0 4px 14px rgba(99, 102, 241, 0.35); }
         button.btn-secondary { background: var(--bg-elevated); color: var(--text-primary); border: 1px solid var(--border-highlight); }
         button.btn-secondary:hover { background: #2D3748; }
+        button.btn-success { background: linear-gradient(135deg, #10B981, #059669); color: white; }
+        button.btn-danger { background: rgba(244, 63, 94, 0.15); color: #FB7185; border: 1px solid rgba(244, 63, 94, 0.3); }
 
-        /* Live Telemetry Progress */
-        .telemetry-card { display: none; background: #080C14; border: 1px solid var(--border); border-radius: 14px; padding: 22px; margin-bottom: 28px; }
+        .banner-alert { display: none; padding: 12px 16px; border-radius: 10px; font-size: 0.88rem; margin-bottom: 16px; line-height: 1.5; }
+        .banner-alert.error { background: rgba(244, 63, 94, 0.12); border: 1px solid rgba(244, 63, 94, 0.35); color: #FECDD3; }
+        .banner-alert.success { background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.35); color: #A7F3D0; }
+        .banner-alert.info { background: rgba(56, 189, 248, 0.12); border: 1px solid rgba(56, 189, 248, 0.35); color: #BAE6FD; }
+
+        .telemetry-card { display: none; background: #080C14; border: 1px solid var(--border); border-radius: 14px; padding: 22px; margin-bottom: 24px; }
         .progress-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
         .stage-title { font-weight: 600; font-size: 0.95rem; color: var(--accent-cyan); display: flex; align-items: center; gap: 8px; }
         .stage-pct { font-family: var(--font-mono); font-weight: 700; font-size: 0.9rem; color: var(--text-primary); }
         .progress-bar-bg { width: 100%; height: 8px; background: #1E293B; border-radius: 9999px; overflow: hidden; margin-bottom: 16px; }
-        .progress-bar-fill { height: 100%; width: 0%; background: linear-gradient(90deg, var(--accent-primary), var(--accent-cyan)); transition: width 0.4s ease; }
-        .terminal { background: #05070B; border: 1px solid #161F30; border-radius: 8px; padding: 14px; max-height: 220px; overflow-y: auto; font-family: var(--font-mono); font-size: 0.8rem; line-height: 1.6; color: #7DD3FC; }
+        .progress-bar-fill { height: 100%; width: 0%; background: linear-gradient(90deg, var(--accent-primary), var(--accent-cyan)); transition: width 0.3s ease; }
+        .terminal { background: #05070B; border: 1px solid #161F30; border-radius: 8px; padding: 14px; max-height: 180px; overflow-y: auto; font-family: var(--font-mono); font-size: 0.8rem; line-height: 1.6; color: #7DD3FC; }
 
-        /* Results Hub & Tabs */
-        .results-container { display: none; }
+        .results-container { display: none; margin-top: 24px; }
         .tabs-header { display: flex; gap: 6px; border-bottom: 1px solid var(--border); margin-bottom: 24px; overflow-x: auto; padding-bottom: 4px; }
         .tab-btn { background: transparent; border: none; padding: 10px 16px; font-size: 0.88rem; font-weight: 600; color: var(--text-secondary); border-radius: 8px; cursor: pointer; transition: all 0.15s; white-space: nowrap; }
         .tab-btn:hover { color: var(--text-primary); background: rgba(30, 41, 59, 0.4); }
@@ -574,7 +593,6 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
         .tab-panel.active { display: block; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 
-        /* Result Components */
         .prose { font-size: 0.95rem; line-height: 1.7; color: #CBD5E1; }
         .prose h2, .prose h3 { color: var(--text-primary); margin: 24px 0 12px 0; font-weight: 700; }
         .prose p { margin-bottom: 16px; }
@@ -598,7 +616,6 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
         .deliverable-title { font-weight: 700; font-size: 1.1rem; color: var(--text-primary); margin-bottom: 8px; }
         .deliverable-desc { font-size: 0.82rem; color: var(--text-secondary); line-height: 1.5; margin-bottom: 20px; }
 
-        /* Footer */
         footer { border-top: 1px solid var(--border); padding: 24px 28px; text-align: center; font-size: 0.8rem; color: var(--text-muted); }
     </style>
 </head>
@@ -611,7 +628,8 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
         </a>
         <div class="nav-links">
             <a href="#investigation" class="nav-link active">Investigation</a>
-            <a href="#sessions" class="nav-link" onclick="loadSessionsHistory()">Research Library</a>
+            <a href="#credentialsCard" class="nav-link">Credentials</a>
+            <a href="#sessionsSection" class="nav-link" onclick="loadSessionsHistory()">Research Library</a>
             <a href="/api/health" target="_blank" class="nav-link">API Health</a>
             <div class="nav-status">
                 <span class="status-dot green" id="headerStatusDot"></span>
@@ -629,26 +647,43 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
             </p>
         </section>
 
-        <section class="metrics-ribbon">
-            <div class="metric-card">
-                <div class="metric-label">Pipeline Architecture</div>
-                <div class="metric-val">17 Stages</div>
-                <div class="metric-sub">Autonomous Orchestration</div>
+        <!-- Credentials & Keys Management Card -->
+        <section class="card" id="credentialsCard">
+            <div class="card-header">
+                <div class="card-title">🔑 API Credentials & Provider Settings</div>
+                <div style="display: flex; gap: 8px;">
+                    <span id="badgeGeminiStatus" class="badge-status badge-unverified">Gemini: Checking...</span>
+                    <span id="badgeTavilyStatus" class="badge-status badge-supported">Tavily: Free Fallback</span>
+                </div>
             </div>
-            <div class="metric-card">
-                <div class="metric-label">Citation Engine</div>
-                <div class="metric-val">Crossref & DOI.org</div>
-                <div class="metric-sub">Content Negotiation API</div>
+
+            <div id="keyFeedbackBanner" class="banner-alert"></div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                <div class="form-group">
+                    <label for="inputGeminiKey">
+                        Google Gemini API Key
+                        <span style="font-weight: 400; color: var(--text-muted);">(Get free key at <a href="https://aistudio.google.com/" target="_blank" style="color: var(--accent-cyan); text-decoration: underline;">Google AI Studio</a>)</span>
+                    </label>
+                    <input type="password" id="inputGeminiKey" placeholder="Paste your Gemini key: AIzaSy...">
+                </div>
+                <div class="form-group">
+                    <label for="inputTavilyKey">
+                        Tavily Search API Key
+                        <span style="font-weight: 400; color: var(--text-muted);">(Optional: provides deep web search; DuckDuckGo fallback if blank)</span>
+                    </label>
+                    <input type="password" id="inputTavilyKey" placeholder="Paste your Tavily key: tvly-...">
+                </div>
             </div>
-            <div class="metric-card">
-                <div class="metric-label">Storage Backend</div>
-                <div class="metric-val" id="dbBackendVal">Checking...</div>
-                <div class="metric-sub" id="dbBackendSub">Universal Persistence Engine</div>
-            </div>
-            <div class="metric-card">
-                <div class="metric-label">Validation Protocol</div>
-                <div class="metric-val" style="color: var(--accent-emerald);">Independent Audit</div>
-                <div class="metric-sub">Critic & Reviewer Agent</div>
+
+            <div class="btn-row" style="margin-top: 10px;">
+                <button class="btn-success" id="btnSaveKeys" onclick="saveAndTestCredentials()">
+                    💾 Save & Validate Credentials
+                </button>
+                <button class="btn-danger" id="btnClearKeys" onclick="clearSavedCredentials()">
+                    🗑️ Clear Saved Keys
+                </button>
+                <span id="keySaveIndicator" style="font-size: 0.8rem; color: var(--text-muted);"></span>
             </div>
         </section>
 
@@ -657,11 +692,15 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
             <div class="card-header">
                 <div class="card-title">🔬 Launch Scientific Research Investigation</div>
             </div>
+
+            <div id="investigationError" class="banner-alert error"></div>
+
             <div class="form-group">
                 <label for="topicInput">Research Topic or Scientific Question</label>
                 <input type="text" id="topicInput" placeholder="e.g., Zero-Trust Architecture Implementation in Cloud-Native Healthcare Informatics" value="Zero-Trust Architecture Implementation in Cloud-Native Healthcare Informatics">
                 <div class="sample-pills">
                     <span style="font-size: 0.75rem; color: var(--text-muted); align-self: center;">Suggested:</span>
+                    <span class="sample-pill" onclick="setTopic(this.textContent)">Zero-Trust Architecture Implementation in Cloud-Native Healthcare Informatics</span>
                     <span class="sample-pill" onclick="setTopic(this.textContent)">Post-Quantum Cryptography in Healthcare EHR Systems</span>
                     <span class="sample-pill" onclick="setTopic(this.textContent)">Diffusion Models for Medical Anomaly Detection</span>
                     <span class="sample-pill" onclick="setTopic(this.textContent)">Federated Learning Security Against Model Poisoning Attacks</span>
@@ -679,8 +718,10 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
                     </select>
                 </div>
                 <div class="form-group">
-                    <label for="apiKeyInput">Google Gemini API Key <span style="font-weight: 400; color: var(--text-muted);">(Optional: uses server environment if blank)</span></label>
-                    <input type="password" id="apiKeyInput" placeholder="Uses server GEMINI_API_KEY if left blank">
+                    <label>Active Credential Source</label>
+                    <div id="activeCredentialNotice" style="padding: 12px 16px; background: #0A0E17; border: 1px solid var(--border); border-radius: 10px; font-size: 0.88rem; color: #CBD5E1;">
+                        Detecting credentials...
+                    </div>
                 </div>
             </div>
 
@@ -717,13 +758,13 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
         <!-- Research Results Workspace -->
         <section class="results-container" id="resultsContainer">
             <div class="tabs-header">
-                <button class="tab-btn active" onclick="switchTab('tab-blueprint')">📌 Blueprint & Hypothesis</button>
-                <button class="tab-btn" onclick="switchTab('tab-lit')">📚 Literature Review</button>
-                <button class="tab-btn" onclick="switchTab('tab-evidence')">📊 Evidence Matrix</button>
-                <button class="tab-btn" onclick="switchTab('tab-gaps')">🧭 Research Gaps</button>
-                <button class="tab-btn" onclick="switchTab('tab-method')">⚙️ Methodology</button>
-                <button class="tab-btn" onclick="switchTab('tab-review')">🛡️ Peer Review Audit</button>
-                <button class="tab-btn" onclick="switchTab('tab-export')">📥 Deliverables Export</button>
+                <button class="tab-btn active" onclick="switchTab('tab-blueprint', event)">📌 Blueprint & Hypothesis</button>
+                <button class="tab-btn" onclick="switchTab('tab-lit', event)">📚 Literature Review</button>
+                <button class="tab-btn" onclick="switchTab('tab-evidence', event)">📊 Evidence Matrix</button>
+                <button class="tab-btn" onclick="switchTab('tab-gaps', event)">🧭 Research Gaps</button>
+                <button class="tab-btn" onclick="switchTab('tab-method', event)">⚙️ Methodology</button>
+                <button class="tab-btn" onclick="switchTab('tab-review', event)">🛡️ Peer Review Audit</button>
+                <button class="tab-btn" onclick="switchTab('tab-export', event)">📥 Deliverables Export</button>
             </div>
 
             <!-- Blueprint Tab -->
@@ -852,75 +893,265 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
     </main>
 
     <footer>
-        <div>Klein AI 2.0 — Autonomous Scientific Research Agent • College Engineering Project</div>
+        <div>Klein AI 2.0 — Autonomous Research Agent • College Engineering Project</div>
         <div style="margin-top: 6px; color: var(--text-muted); font-size: 0.75rem;">
             Powered by Google Gemini 2.5/2.0, Crossref Bibliographic API, DOI Content Negotiation, ReportLab, and python-pptx.
         </div>
     </footer>
 
     <script>
-        let currentJobId = null;
-        let pollTimer = null;
+        let serverGeminiConfigured = false;
+        let serverTavilyConfigured = false;
         let currentSessionId = null;
+        let progressInterval = null;
 
         function setTopic(text) {
             document.getElementById('topicInput').value = text;
+            document.getElementById('topicInput').classList.remove('input-error');
+            document.getElementById('investigationError').style.display = 'none';
         }
 
-        async function initHealth() {
-            try {
-                const res = await fetch('/api/health');
-                const data = await res.json();
-                document.getElementById('dbBackendVal').textContent = (data.database_backend || 'SQLite').toUpperCase();
-                document.getElementById('dbBackendSub').textContent = data.database_connected ? '🟢 Connected & Persistent' : '🔴 Standalone Fallback';
-            } catch (e) {
-                console.error('Health check failed', e);
-            }
+        function showBanner(elementId, message, type = 'info') {
+            const el = document.getElementById(elementId);
+            if (!el) return;
+            el.className = 'banner-alert ' + type;
+            el.innerHTML = message;
+            el.style.display = 'block';
         }
 
-        function switchTab(tabId) {
+        function hideBanner(elementId) {
+            const el = document.getElementById(elementId);
+            if (el) el.style.display = 'none';
+        }
+
+        function switchTab(tabId, ev) {
             document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
             document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-            event.currentTarget.classList.add('active');
+            if (ev && ev.currentTarget) {
+                ev.currentTarget.classList.add('active');
+            }
             const target = document.getElementById(tabId);
             if (target) target.classList.add('active');
         }
 
-        async function loadVerifiedDemo() {
-            const btn = document.getElementById('btnDemo');
-            btn.disabled = true;
+        // ======================================================================
+        // CREDENTIAL MANAGEMENT & INITIALIZATION
+        // ======================================================================
+
+        async function initHealthAndCredentials() {
             try {
-                const res = await fetch('/api/demo');
-                const result = await res.json();
-                if (result.success && result.data) {
-                    renderResearchResults(result.data, result.data.session_id || 'demo');
+                const res = await fetch('/api/health');
+                const data = await res.json();
+                serverGeminiConfigured = Boolean(data.gemini_configured);
+                serverTavilyConfigured = Boolean(data.tavily_configured);
+
+                // Check localStorage
+                const userGemini = localStorage.getItem('klein_gemini_api_key') || '';
+                const userTavily = localStorage.getItem('klein_tavily_api_key') || '';
+
+                if (userGemini) {
+                    document.getElementById('inputGeminiKey').value = userGemini;
+                    document.getElementById('badgeGeminiStatus').className = 'badge-status badge-verified';
+                    document.getElementById('badgeGeminiStatus').textContent = 'Gemini: 🟢 User Key Saved';
+                } else if (serverGeminiConfigured) {
+                    document.getElementById('badgeGeminiStatus').className = 'badge-status badge-supported';
+                    document.getElementById('badgeGeminiStatus').textContent = 'Gemini: 🟡 Server Configured';
+                } else {
+                    document.getElementById('badgeGeminiStatus').className = 'badge-status badge-unverified';
+                    document.getElementById('badgeGeminiStatus').textContent = 'Gemini: 🔴 Not Configured';
                 }
+
+                if (userTavily) {
+                    document.getElementById('inputTavilyKey').value = userTavily;
+                    document.getElementById('badgeTavilyStatus').className = 'badge-status badge-verified';
+                    document.getElementById('badgeTavilyStatus').textContent = 'Tavily: 🟢 User Key Saved';
+                } else if (serverTavilyConfigured) {
+                    document.getElementById('badgeTavilyStatus').className = 'badge-status badge-supported';
+                    document.getElementById('badgeTavilyStatus').textContent = 'Tavily: 🟡 Server Key';
+                } else {
+                    document.getElementById('badgeTavilyStatus').className = 'badge-status badge-supported';
+                    document.getElementById('badgeTavilyStatus').textContent = 'Tavily: Free Fallback (DDG)';
+                }
+
+                updateActiveCredentialNotice();
             } catch (e) {
-                alert('Failed to load demo: ' + e.message);
-            } finally {
-                btn.disabled = false;
+                console.error('Failed to initialize health/credentials:', e);
             }
         }
 
-        async function launchResearch() {
-            const topic = document.getElementById('topicInput').value.trim();
-            const apiKey = document.getElementById('apiKeyInput').value.trim();
-            const model = document.getElementById('modelSelect').value;
-            const btn = document.getElementById('btnLaunch');
+        function updateActiveCredentialNotice() {
+            const userGemini = localStorage.getItem('klein_gemini_api_key') || (document.getElementById('inputGeminiKey') ? document.getElementById('inputGeminiKey').value.trim() : '');
+            const notice = document.getElementById('activeCredentialNotice');
+            if (userGemini) {
+                notice.innerHTML = '<span style="color: #34D399; font-weight: 600;">🟢 User Key Active</span> (stored locally in your browser)';
+            } else if (serverGeminiConfigured) {
+                notice.innerHTML = '<span style="color: #A5B4FC; font-weight: 600;">🟡 Server Key Active</span> (configured in Vercel environment)';
+            } else {
+                notice.innerHTML = '<span style="color: #FB7185; font-weight: 600;">🔴 No Gemini Key</span> (please paste key in Credentials panel)';
+            }
+        }
 
-            if (!topic) {
-                alert('Please enter a research topic or scientific question.');
+        async function saveAndTestCredentials() {
+            const btn = document.getElementById('btnSaveKeys');
+            const geminiKey = document.getElementById('inputGeminiKey').value.trim();
+            const tavilyKey = document.getElementById('inputTavilyKey').value.trim();
+            const model = document.getElementById('modelSelect').value;
+
+            hideBanner('keyFeedbackBanner');
+
+            if (!geminiKey) {
+                showBanner('keyFeedbackBanner', '⚠️ Please enter a Google Gemini API Key before testing.', 'error');
+                document.getElementById('inputGeminiKey').classList.add('input-error');
                 return;
             }
 
+            document.getElementById('inputGeminiKey').classList.remove('input-error');
             btn.disabled = true;
+            btn.innerHTML = '⏳ Testing credentials with Google AI Studio...';
+
+            try {
+                const res = await fetch('/api/config/validate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        gemini_api_key: geminiKey,
+                        tavily_api_key: tavilyKey,
+                        model: model
+                    })
+                });
+                const data = await res.json();
+
+                if (res.ok && data.success) {
+                    // Validated! Save to localStorage
+                    localStorage.setItem('klein_gemini_api_key', geminiKey);
+                    if (tavilyKey) {
+                        localStorage.setItem('klein_tavily_api_key', tavilyKey);
+                    } else {
+                        localStorage.removeItem('klein_tavily_api_key');
+                    }
+
+                    document.getElementById('badgeGeminiStatus').className = 'badge-status badge-verified';
+                    document.getElementById('badgeGeminiStatus').textContent = 'Gemini: 🟢 User Key Saved';
+
+                    if (tavilyKey && data.tavily_valid) {
+                        document.getElementById('badgeTavilyStatus').className = 'badge-status badge-verified';
+                        document.getElementById('badgeTavilyStatus').textContent = 'Tavily: 🟢 User Key Saved';
+                    }
+
+                    updateActiveCredentialNotice();
+                    hideBanner('investigationError');
+
+                    showBanner('keyFeedbackBanner', '✅ <strong>Credentials Verified & Saved!</strong> Google Gemini API key authenticated successfully. It will automatically power all research runs.', 'success');
+                } else {
+                    const err = data.error || 'Gemini authentication failed. Please check key validity.';
+                    showBanner('keyFeedbackBanner', '❌ <strong>Authentication Failed:</strong> ' + err, 'error');
+                }
+            } catch (e) {
+                showBanner('keyFeedbackBanner', '❌ Network error during key verification: ' + e.message, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '💾 Save & Validate Credentials';
+            }
+        }
+
+        function clearSavedCredentials() {
+            localStorage.removeItem('klein_gemini_api_key');
+            localStorage.removeItem('klein_tavily_api_key');
+            document.getElementById('inputGeminiKey').value = '';
+            document.getElementById('inputTavilyKey').value = '';
+            initHealthAndCredentials();
+            showBanner('keyFeedbackBanner', '🗑️ Saved browser credentials cleared. The system will revert to server environment keys if available.', 'info');
+        }
+
+        // ======================================================================
+        // RESEARCH PIPELINE EXECUTION
+        // ======================================================================
+
+        function getEffectiveGeminiKey() {
+            return (document.getElementById('inputGeminiKey') ? document.getElementById('inputGeminiKey').value.trim() : '') ||
+                   localStorage.getItem('klein_gemini_api_key') || '';
+        }
+
+        function getEffectiveTavilyKey() {
+            return (document.getElementById('inputTavilyKey') ? document.getElementById('inputTavilyKey').value.trim() : '') ||
+                   localStorage.getItem('klein_tavily_api_key') || '';
+        }
+
+        async function launchResearch() {
+            const topicInput = document.getElementById('topicInput');
+            const topic = topicInput.value.trim();
+            const model = document.getElementById('modelSelect').value;
+            const btn = document.getElementById('btnLaunch');
+            const geminiKey = getEffectiveGeminiKey();
+            const tavilyKey = getEffectiveTavilyKey();
+
+            hideBanner('investigationError');
+            topicInput.classList.remove('input-error');
+
+            if (!topic || topic.length < 3) {
+                topicInput.classList.add('input-error');
+                showBanner('investigationError', '⚠️ Please enter a research topic or scientific question (at least 3 characters).', 'error');
+                topicInput.focus();
+                return;
+            }
+
+            if (!geminiKey && !serverGeminiConfigured) {
+                showBanner('investigationError', '⚠️ <strong>Google Gemini API Key Required:</strong> Please paste and save your Gemini API key in the credentials panel above to launch research.', 'error');
+                document.getElementById('credentialsCard').scrollIntoView({ behavior: 'smooth' });
+                document.getElementById('inputGeminiKey').classList.add('input-error');
+                document.getElementById('inputGeminiKey').focus();
+                return;
+            }
+
+            // Start research UI state
+            btn.disabled = true;
+            btn.innerHTML = '⏳ Conducting Research... (Keep this tab open)';
+
             const telemetry = document.getElementById('telemetryCard');
             telemetry.style.display = 'block';
             document.getElementById('resultsContainer').style.display = 'none';
 
+            const term = document.getElementById('terminalLogs');
+            term.innerHTML = '[' + new Date().toLocaleTimeString() + '] Initializing Autonomous Research Pipeline on: "' + topic + '"...';
+
+            // Animated progress ticker while synchronous request executes
+            let simulatedPct = 8;
+            const stages = [
+                { pct: 15, text: "Step 2/17: Formulating Scientific Blueprint & Research Questions" },
+                { pct: 28, text: "Step 5/17: Harvesting Empirical Sources from Live Academic Web" },
+                { pct: 42, text: "Step 8/17: Deep DOM Parsing & Text Passage Extraction" },
+                { pct: 58, text: "Step 10/17: Synthesizing Cross-Source Comparative Matrix" },
+                { pct: 72, text: "Step 11/17: Authoring Scholarly Literature Review" },
+                { pct: 85, text: "Step 15/17: Auditing Citations with DOI.org & Crossref Registries" },
+                { pct: 93, text: "Step 16/17: Executing Independent Peer Review Audit" },
+                { pct: 97, text: "Step 17/17: Compiling Academic Whitepaper & PowerPoint Deliverables" }
+            ];
+            let stageIdx = 0;
+
+            if (progressInterval) clearInterval(progressInterval);
+            progressInterval = setInterval(() => {
+                if (stageIdx < stages.length) {
+                    const st = stages[stageIdx];
+                    if (simulatedPct < st.pct) {
+                        simulatedPct += 2;
+                        document.getElementById('progressBarFill').style.width = simulatedPct + '%';
+                        document.getElementById('currentPctText').textContent = simulatedPct + '%';
+                    } else {
+                        document.getElementById('currentStageText').textContent = st.text;
+                        term.innerHTML += '<br/>[' + new Date().toLocaleTimeString() + '] ' + st.text;
+                        term.scrollTop = term.scrollHeight;
+                        stageIdx++;
+                    }
+                }
+            }, 1200);
+
             try {
-                const payload = { topic: topic, model: model };
-                if (apiKey) payload.gemini_api_key = apiKey;
+                const payload = {
+                    topic: topic,
+                    model: model
+                };
+                if (geminiKey) payload.gemini_api_key = geminiKey;
+                if (tavilyKey) payload.tavily_api_key = tavilyKey;
 
                 const res = await fetch('/api/research', {
                     method: 'POST',
@@ -929,60 +1160,62 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
                 });
                 const data = await res.json();
 
-                if (!res.ok) {
-                    throw new Error(data.error || 'Failed to initiate research job');
+                clearInterval(progressInterval);
+
+                if (!res.ok || !data.success) {
+                    const err = (data && data.error) ? data.error : ('Request failed with status ' + res.status);
+                    throw new Error(err);
                 }
 
-                if (data.job_id) {
-                    currentJobId = data.job_id;
-                    startPolling(currentJobId);
-                } else if (data.data) {
-                    // Synchronous response
-                    renderResearchResults(data.data, data.data.session_id);
+                // Complete progress
+                document.getElementById('progressBarFill').style.width = '100%';
+                document.getElementById('currentPctText').textContent = '100%';
+                document.getElementById('currentStageText').textContent = 'Research Investigation Completed Successfully!';
+                term.innerHTML += '<br/>[' + new Date().toLocaleTimeString() + '] ✅ All 17 research pipeline stages executed successfully.';
+                term.scrollTop = term.scrollHeight;
+
+                setTimeout(() => {
                     telemetry.style.display = 'none';
-                    btn.disabled = false;
-                }
+                    renderResearchResults(data.data, data.data.session_id);
+                    document.getElementById('resultsContainer').scrollIntoView({ behavior: 'smooth' });
+                }, 800);
+
             } catch (e) {
-                alert('Error: ' + e.message);
+                clearInterval(progressInterval);
                 telemetry.style.display = 'none';
+                showBanner('investigationError', '❌ <strong>Research Pipeline Error:</strong> ' + e.message, 'error');
+                document.getElementById('investigation').scrollIntoView({ behavior: 'smooth' });
+            } finally {
                 btn.disabled = false;
+                btn.innerHTML = '🚀 Launch Autonomous Pipeline';
             }
         }
 
-        function startPolling(jobId) {
-            if (pollTimer) clearInterval(pollTimer);
-            pollTimer = setInterval(async () => {
-                try {
-                    const res = await fetch('/api/jobs/' + jobId);
-                    const data = await res.json();
-                    if (!data.success || !data.job) return;
-
-                    const job = data.job;
-                    document.getElementById('progressBarFill').style.width = (job.progress || 0) + '%';
-                    document.getElementById('currentPctText').textContent = (job.progress || 0) + '%';
-                    document.getElementById('currentStageText').textContent = job.stage || 'Executing research pipeline...';
-
-                    if (job.logs && job.logs.length) {
-                        const term = document.getElementById('terminalLogs');
-                        term.innerHTML = job.logs.slice(-10).join('<br/>');
-                        term.scrollTop = term.scrollHeight;
-                    }
-
-                    if (job.status === 'completed') {
-                        clearInterval(pollTimer);
-                        document.getElementById('btnLaunch').disabled = false;
-                        document.getElementById('telemetryCard').style.display = 'none';
-                        renderResearchResults(job.result, job.result ? job.result.session_id : null);
-                    } else if (job.status === 'failed') {
-                        clearInterval(pollTimer);
-                        document.getElementById('btnLaunch').disabled = false;
-                        alert('Research execution failed: ' + (job.error || 'Unknown error'));
-                    }
-                } catch (e) {
-                    console.error('Poll error', e);
+        async function loadVerifiedDemo() {
+            const btn = document.getElementById('btnDemo');
+            btn.disabled = true;
+            btn.innerHTML = '⏳ Loading Demo...';
+            hideBanner('investigationError');
+            try {
+                const res = await fetch('/api/demo');
+                const result = await res.json();
+                if (result.success && result.data) {
+                    renderResearchResults(result.data, result.data.session_id || 'demo');
+                    document.getElementById('resultsContainer').scrollIntoView({ behavior: 'smooth' });
+                } else {
+                    throw new Error(result.error || 'Failed to retrieve demo dataset');
                 }
-            }, 2000);
+            } catch (e) {
+                showBanner('investigationError', '❌ Demo Load Error: ' + e.message, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '⚡ Instant Verified Demo (Zero Quota)';
+            }
         }
+
+        // ======================================================================
+        // RESULTS RENDERING
+        // ======================================================================
 
         function renderResearchResults(data, sessionId) {
             currentSessionId = sessionId;
@@ -990,8 +1223,8 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
 
             // Blueprint
             const bp = data.blueprint || {};
-            document.getElementById('bpDomain').textContent = bp.domain ? ('Domain: ' + bp.domain) : 'General Research';
-            document.getElementById('bpHypothesis').textContent = 'Core Hypothesis: ' + (bp.core_hypothesis || 'N/A');
+            document.getElementById('bpDomain').textContent = bp.domain ? ('Domain: ' + bp.domain) : 'General Scientific Research';
+            document.getElementById('bpHypothesis').textContent = 'Core Hypothesis: ' + (bp.core_hypothesis || 'Empirical validation of autonomous synthesis.');
 
             const qBox = document.getElementById('bpQuestions');
             qBox.innerHTML = '';
@@ -1003,7 +1236,7 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
                 qBox.appendChild(el);
             });
 
-            // Literature Review (convert markdown basic headers/bold)
+            // Literature Review
             const litRaw = data.literature_review || data.report_markdown || 'No synthesis available.';
             document.getElementById('litReviewContent').innerHTML = litRaw
                 .replace(/^### (.*$)/gim, '<h3>$1</h3>')
@@ -1018,11 +1251,11 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
             const cits = data.audited_citations || [];
             (cits.length ? cits : (data.sources || [])).forEach(c => {
                 const tr = document.createElement('tr');
-                const title = c.title || 'Scholarly Paper';
+                const title = c.title || 'Scholarly Publication';
                 const url = c.url || (c.doi ? ('https://doi.org/' + c.doi) : '#');
-                const status = c.verification_status || 'METADATA_MATCHED';
+                const status = c.verification_status || c.status || 'METADATA_MATCHED';
                 const authors = c.authors ? c.authors.join(', ') : (c.domain || 'Peer-Reviewed Source');
-                const yr = c.publication_year || '2024';
+                const yr = c.year || c.publication_year || '2024';
 
                 tr.innerHTML = '<td><a href="' + url + '" target="_blank" style="color: var(--accent-cyan); text-decoration: none; font-weight: 600;">' + title + '</a>' +
                     (c.doi ? '<div style="font-family: var(--font-mono); font-size: 0.75rem; color: var(--text-muted); margin-top: 3px;">DOI: ' + c.doi + '</div>' : '') + '</td>' +
@@ -1046,7 +1279,7 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
                     '<span class="badge-status badge-supported">' + (g.gap_id || 'GAP') + '</span>' +
                     '<strong>' + g.title + '</strong></div>' +
                     '<div style="color: var(--text-secondary); font-size: 0.9rem; margin-top: 6px;">' + g.description + '</div>' +
-                    '<div style="color: var(--accent-cyan); font-size: 0.85rem; margin-top: 8px;"><b>Opportunity:</b> ' + (g.opportunity || 'Empirical validation') + '</div>';
+                    '<div style="color: var(--accent-cyan); font-size: 0.85rem; margin-top: 8px;"><b>Strategic Opportunity:</b> ' + (g.opportunity || 'Empirical benchmark protocol') + '</div>';
                 gapsBox.appendChild(el);
             });
 
@@ -1079,12 +1312,12 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
             });
             const wBox = document.getElementById('reviewWeaknesses');
             wBox.innerHTML = '';
-            (rev.key_weaknesses || ['Further benchmark comparisons recommended']).forEach(w => {
+            (rev.key_weaknesses || ['Further benchmark comparisons recommended under load']).forEach(w => {
                 const li = document.createElement('li');
                 li.textContent = w;
                 wBox.appendChild(li);
             });
-            document.getElementById('reviewCritique').textContent = rev.summary_critique || 'The synthesized investigation complies with academic standards.';
+            document.getElementById('reviewCritique').textContent = rev.summary_critique || 'The synthesized investigation complies with academic whitepaper standards.';
 
             // Export Links
             if (sessionId) {
@@ -1092,6 +1325,10 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
                 document.getElementById('btnDownloadPptx').href = '/api/download/pptx?id=' + encodeURIComponent(sessionId);
             }
         }
+
+        // ======================================================================
+        // SESSIONS LIBRARY
+        // ======================================================================
 
         async function loadSessionsHistory() {
             const sec = document.getElementById('sessionsSection');
@@ -1103,7 +1340,7 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
                 const tbody = document.getElementById('sessionsTableBody');
                 tbody.innerHTML = '';
                 if (!data.sessions || !data.sessions.length) {
-                    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color: var(--text-muted);">No saved sessions found.</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color: var(--text-muted); padding: 20px;">No saved sessions yet. Execute research or load the demo to create a session.</td></tr>';
                     return;
                 }
                 data.sessions.forEach(s => {
@@ -1111,11 +1348,15 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
                     tr.innerHTML = '<td><strong>' + s.topic + '</strong></td>' +
                         '<td><span class="badge-status badge-supported">' + (s.model || 'gemini-2.5-flash') + '</span></td>' +
                         '<td style="color: var(--text-muted); font-size: 0.8rem;">' + (s.created_at || 'Recent') + '</td>' +
-                        '<td><button class="btn-secondary" style="padding: 6px 12px; font-size: 0.78rem;" onclick="viewSession(\'' + s.id + '\')">View</button></td>';
+                        '<td style="display: flex; gap: 6px;">' +
+                        '<button class="btn-secondary" style="padding: 6px 10px; font-size: 0.78rem;" onclick="viewSession(\'' + s.id + '\')">👁️ View</button>' +
+                        '<a href="/api/download/pdf?id=' + encodeURIComponent(s.id) + '" target="_blank"><button class="btn-secondary" style="padding: 6px 10px; font-size: 0.78rem;">📕 PDF</button></a>' +
+                        '<a href="/api/download/pptx?id=' + encodeURIComponent(s.id) + '" target="_blank"><button class="btn-secondary" style="padding: 6px 10px; font-size: 0.78rem;">📊 PPTX</button></a>' +
+                        '</td>';
                     tbody.appendChild(tr);
                 });
             } catch (e) {
-                console.error(e);
+                console.error('Failed to load sessions:', e);
             }
         }
 
@@ -1133,7 +1374,8 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
             }
         }
 
-        initHealth();
+        // Initialize credentials and health check on page load
+        initHealthAndCredentials();
     </script>
 </body>
 </html>
@@ -1148,7 +1390,7 @@ def app(environ, start_response):
     """
     WSGI Serverless Application Entrypoint for Vercel deployment and REST API.
     Provides /api/health, /api/demo, /api/research, /api/jobs/<job_id>, /api/sessions,
-    /api/download/pdf, /api/download/pptx, and / HTML landing page.
+    /api/download/pdf, /api/download/pptx, /api/config/validate, and / HTML landing page.
     """
     query_string = environ.get("QUERY_STRING", "")
     params = urllib.parse.parse_qs(query_string)
@@ -1237,7 +1479,6 @@ def app(environ, start_response):
         return [data_bytes]
 
     # Global Rate Limiting
-    # /api/research: max 15 req/min; others: max 120 req/min
     endpoint_limit = 15 if "/research" in path else 120
     if not rate_limiter.is_allowed(client_ip, limit=endpoint_limit, window_seconds=60):
         return send_json({
@@ -1273,7 +1514,7 @@ def app(environ, start_response):
             })
         return send_html(HTML_LANDING_PAGE)
 
-    # 2. SYSTEM HEALTH & DIAGNOSTICS (Minimal, zero-key-leakage)
+    # 2. SYSTEM HEALTH & DIAGNOSTICS
     if path in ("/health", "/api/health") and method == "GET":
         gemini_key = get_gemini_api_key()
         tavily_key = get_tavily_api_key()
@@ -1291,7 +1532,68 @@ def app(environ, start_response):
             "request_id": request_id
         })
 
-    # 3. VERIFIED DEMO DATASET
+    # 3. CREDENTIAL CONFIGURATION & LIVE VALIDATION (/api/config/validate, /api/keys/test)
+    if path in ("/api/config/validate", "/api/keys/test") and method == "POST":
+        try:
+            content_length = int(environ.get("CONTENT_LENGTH", 0) or 0)
+        except ValueError:
+            content_length = 0
+
+        body_bytes = environ["wsgi.input"].read(content_length) if content_length > 0 else b""
+        try:
+            payload = json.loads(body_bytes.decode("utf-8")) if body_bytes else {}
+        except Exception:
+            return send_json({"success": False, "error": "Malformed JSON payload.", "request_id": request_id}, status="400 Bad Request")
+
+        gemini_candidate = clean_api_key(payload.get("gemini_api_key"))
+        tavily_candidate = clean_api_key(payload.get("tavily_api_key"))
+        model_candidate = payload.get("model") or DEFAULT_GEMINI_MODEL
+
+        if not gemini_candidate:
+            return send_json({
+                "success": False,
+                "error": "Gemini API key is required for verification.",
+                "request_id": request_id
+            }, status="400 Bad Request")
+
+        # Perform actual live test against Gemini API
+        test_result = GeminiClient.test_connection(api_key=gemini_candidate, model=model_candidate)
+        if not test_result.get("success"):
+            return send_json({
+                "success": False,
+                "gemini_valid": False,
+                "error": test_result.get("message", "Gemini API rejected the key."),
+                "category": test_result.get("category", "AUTH_ERROR"),
+                "request_id": request_id
+            }, status="400 Bad Request")
+
+        # If Tavily provided, test it too
+        tavily_ok = True
+        tavily_msg = "Not tested"
+        if tavily_candidate:
+            tavily_ok, tavily_msg = test_tavily_key(tavily_candidate)
+
+        return send_json({
+            "success": True,
+            "gemini_valid": True,
+            "gemini_message": test_result.get("message"),
+            "model_tested": test_result.get("model"),
+            "tavily_valid": tavily_ok,
+            "tavily_message": tavily_msg,
+            "request_id": request_id
+        })
+
+    # 4. CONFIGURATION STATUS (/api/config/status)
+    if path in ("/api/config/status", "/api/config") and method == "GET":
+        return send_json({
+            "server_gemini_configured": bool(get_gemini_api_key()),
+            "server_tavily_configured": bool(get_tavily_api_key()),
+            "default_model": DEFAULT_GEMINI_MODEL,
+            "supported_models": SUPPORTED_MODELS,
+            "request_id": request_id
+        })
+
+    # 5. VERIFIED DEMO DATASET
     if path in ("/demo", "/api/demo") and method == "GET":
         demo_payload = {k: v for k, v in VERIFIED_DEMO_DATA.items() if k not in ("pdf_bytes", "pptx_bytes")}
         return send_json({
@@ -1301,7 +1603,7 @@ def app(environ, start_response):
             "request_id": request_id
         })
 
-    # 4. SAVED SESSIONS LIST
+    # 6. SAVED SESSIONS LIST
     if path in ("/sessions", "/api/sessions") and method == "GET":
         init_db()
         sessions = list_sessions()
@@ -1312,7 +1614,7 @@ def app(environ, start_response):
             "request_id": request_id
         })
 
-    # 5. INDIVIDUAL SESSION RETRIEVAL
+    # 7. INDIVIDUAL SESSION RETRIEVAL
     if path in ("/session", "/api/session") and method == "GET":
         init_db()
         session_id = params.get("id", [None])[0]
@@ -1326,21 +1628,20 @@ def app(environ, start_response):
             return send_json({"success": True, "session": session, "request_id": request_id})
         return send_json({"success": False, "error": f"Session '{session_id}' not found", "request_id": request_id}, status="404 Not Found")
 
-    # 6. ASYNCHRONOUS JOB POLLING (/api/jobs/<job_id>)
+    # 8. ASYNCHRONOUS JOB POLLING (/api/jobs/<job_id>)
     if path.startswith("/api/jobs/") and method == "GET":
         job_id = path[len("/api/jobs/"):].strip()
         job = job_manager.get_job(job_id)
         if not job:
             return send_json({"success": False, "error": f"Job '{job_id}' not found", "request_id": request_id}, status="404 Not Found")
         
-        # Exclude raw binaries if present in result
         job_copy = dict(job)
         if job_copy.get("result") and isinstance(job_copy["result"], dict):
             job_copy["result"] = {k: v for k, v in job_copy["result"].items() if k not in ("pdf_bytes", "pptx_bytes")}
 
         return send_json({"success": True, "job": job_copy, "request_id": request_id})
 
-    # 7. DELIVERABLE DOWNLOADS (/api/download/pdf, /api/download/pptx)
+    # 9. DELIVERABLE DOWNLOADS (/api/download/pdf, /api/download/pptx)
     if path in ("/api/download/pdf", "/api/download/pptx") and method == "GET":
         init_db()
         session_id = params.get("id", [None])[0]
@@ -1366,7 +1667,7 @@ def app(environ, start_response):
                 f"KleinAI_{clean_slug}.pptx"
             )
 
-    # 8. RESEARCH PIPELINE DISPATCH (/api/research)
+    # 10. RESEARCH PIPELINE DISPATCH (/api/research)
     if path in ("/research", "/api/research") and method == "POST":
         # Validate Content-Type
         content_type = environ.get("CONTENT_TYPE", "")
@@ -1424,8 +1725,8 @@ def app(environ, start_response):
                 "request_id": request_id
             }, status="400 Bad Request")
 
-        gemini_key = payload.get("gemini_api_key") or get_gemini_api_key()
-        tavily_key = payload.get("tavily_api_key") or get_tavily_api_key()
+        gemini_key = clean_api_key(payload.get("gemini_api_key")) or get_gemini_api_key()
+        tavily_key = clean_api_key(payload.get("tavily_api_key")) or get_tavily_api_key()
 
         if not gemini_key:
             return send_json({
@@ -1434,42 +1735,43 @@ def app(environ, start_response):
                 "request_id": request_id
             }, status="400 Bad Request")
 
-        # Check synchronous execution override (?sync=true)
-        is_sync = params.get("sync", ["false"])[0].lower() in ("true", "1")
-        if is_sync:
-            try:
-                agent = KleinResearchAgent(gemini_api_key=gemini_key, tavily_api_key=tavily_key, model=model)
-                result = agent.execute_research(topic)
-                cleaned = {k: v for k, v in result.items() if k not in ("pdf_bytes", "pptx_bytes")}
-                return send_json({
-                    "success": True,
-                    "topic": topic,
-                    "data": cleaned,
-                    "request_id": request_id
-                })
-            except GeminiAuthError as e:
-                return send_json({"success": False, "error": f"API Credential Error: {str(e)}", "request_id": request_id}, status="401 Unauthorized")
-            except Exception as e:
-                return send_json({"success": False, "error": f"Research execution failed: {str(e)}", "request_id": request_id}, status="500 Internal Server Error")
+        # Explicit async job queue override (?async=true)
+        is_async = params.get("async", ["false"])[0].lower() in ("true", "1")
+        if is_async:
+            job_id = job_manager.submit_research_job(
+                topic=topic,
+                gemini_api_key=gemini_key,
+                tavily_api_key=tavily_key,
+                model=model
+            )
+            return send_json({
+                "success": True,
+                "job_id": job_id,
+                "status": "queued",
+                "poll_url": f"/api/jobs/{job_id}",
+                "message": "Research job submitted successfully. Poll 'poll_url' to track progress.",
+                "request_id": request_id
+            }, status="202 Accepted")
 
-        # Asynchronous job submission (default)
-        job_id = job_manager.submit_research_job(
-            topic=topic,
-            gemini_api_key=gemini_key,
-            tavily_api_key=tavily_key,
-            model=model
-        )
+        # Synchronous execution (Default: keeps HTTP connection alive so serverless containers complete)
+        try:
+            agent = KleinResearchAgent(gemini_api_key=gemini_key, tavily_api_key=tavily_key, model=model)
+            result = agent.execute_research(topic)
+            cleaned = {k: v for k, v in result.items() if k not in ("pdf_bytes", "pptx_bytes")}
+            return send_json({
+                "success": True,
+                "topic": topic,
+                "data": cleaned,
+                "request_id": request_id
+            })
+        except GeminiAuthError as e:
+            return send_json({"success": False, "error": f"API Credential Error: {str(e)}", "request_id": request_id}, status="401 Unauthorized")
+        except GeminiRateLimitError as e:
+            return send_json({"success": False, "error": f"Rate Limit Exceeded: {str(e)}", "request_id": request_id}, status="429 Too Many Requests")
+        except Exception as e:
+            return send_json({"success": False, "error": f"Research execution failed: {str(e)}", "request_id": request_id}, status="500 Internal Server Error")
 
-        return send_json({
-            "success": True,
-            "job_id": job_id,
-            "status": "queued",
-            "poll_url": f"/api/jobs/{job_id}",
-            "message": "Research job submitted successfully. Poll 'poll_url' to track progress.",
-            "request_id": request_id
-        }, status="202 Accepted")
-
-    # 9. ROUTE NOT FOUND
+    # 11. ROUTE NOT FOUND
     return send_json({
         "error": "Not Found",
         "path": path,

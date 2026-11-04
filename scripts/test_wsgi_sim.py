@@ -1,6 +1,3 @@
-"""
-Simulate WSGI environment calls against app.py to verify all endpoints and security headers.
-"""
 import io
 import sys
 import json
@@ -62,7 +59,7 @@ def run_tests():
     data = json.loads(body.decode("utf-8"))
     assert data["status"] == "healthy"
     assert "gemini_configured" in data
-    assert "gemini_masked_key" not in data  # MUST NOT leak masked key
+    assert "gemini_masked_key" not in data
     assert "tavily_configured" in data
     print("  -> Passed! (No secret leakage)")
 
@@ -71,7 +68,7 @@ def run_tests():
     assert status == "200 OK"
     data = json.loads(body.decode("utf-8"))
     assert data["success"] is True
-    assert "10.5220/0012937100004508" in str(data)  # authentic DOI in dataset
+    assert "10.5220/0012937100004508" in str(data)
     print("  -> Passed!")
 
     print("Testing 5: GET /api/sessions")
@@ -92,9 +89,9 @@ def run_tests():
     assert "400" in status
     print("  -> Passed! (Rejected short topic with 400)")
 
-    print("Testing 8: POST /api/research - Valid asynchronous submission")
+    print("Testing 8: POST /api/research?async=true - Asynchronous submission")
     status, headers, body = simulate_request(
-        "/api/research",
+        "/api/research?async=true",
         method="POST",
         body=json.dumps({"topic": "Zero-Trust Architecture in Critical Cloud Healthcare", "gemini_api_key": "test_key"}),
         headers={"Content-Type": "application/json"}
@@ -124,7 +121,19 @@ def run_tests():
     assert "request_id" in data
     print("  -> Passed!")
 
-    print("\nALL 10 SIMULATION TESTS PASSED!")
+    print("Testing 11: POST /api/config/validate (Live credential test)")
+    status, headers, body = simulate_request(
+        "/api/config/validate",
+        method="POST",
+        body=json.dumps({"gemini_api_key": "invalid_probe_key"}),
+        headers={"Content-Type": "application/json"}
+    )
+    assert "400" in status
+    data = json.loads(body.decode("utf-8"))
+    assert data["gemini_valid"] is False
+    print("  -> Passed! (Validated that invalid keys are safely caught)")
+
+    print("\nALL 11 SIMULATION TESTS PASSED!")
 
 if __name__ == "__main__":
     run_tests()

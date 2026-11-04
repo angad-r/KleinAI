@@ -112,7 +112,7 @@ class GeminiClient:
         
         # Try primary target model, with automatic fallback if the model is retired/unavailable
         models_to_try = [target_model]
-        for fallback_m in ["gemini-flash-lite-latest", "gemini-3.5-flash", "gemini-flash-latest"]:
+        for fallback_m in SUPPORTED_MODELS:
             if fallback_m not in models_to_try:
                 models_to_try.append(fallback_m)
         
