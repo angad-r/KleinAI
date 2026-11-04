@@ -130,10 +130,41 @@ def run_tests():
     )
     assert "400" in status
     data = json.loads(body.decode("utf-8"))
-    assert data["gemini_valid"] is False
+    assert data.get("success") is False or data.get("gemini_valid") is False
+    assert "error" in data
     print("  -> Passed! (Validated that invalid keys are safely caught)")
 
-    print("\nALL 11 SIMULATION TESTS PASSED!")
+    print("Testing 12: GET /api/download/pdf?id=demo")
+    status, headers, body = simulate_request("/api/download/pdf?id=demo")
+    assert status == "200 OK"
+    assert headers.get("Content-Type") == "application/pdf"
+    assert len(body) > 1000
+    assert body.startswith(b"%PDF")
+    print("  -> Passed! (Demo PDF download works)")
+
+    print("Testing 13: GET /api/download/pptx?id=demo")
+    status, headers, body = simulate_request("/api/download/pptx?id=demo")
+    assert status == "200 OK"
+    assert "presentation" in headers.get("Content-Type", "")
+    assert len(body) > 10000
+    print("  -> Passed! (Demo PPTX download works)")
+
+    print("Testing 14: GET /api/config/status")
+    status, headers, body = simulate_request("/api/config/status")
+    assert status == "200 OK"
+    data = json.loads(body.decode("utf-8"))
+    assert "server_gemini_configured" in data
+    assert "supported_models" in data
+    print("  -> Passed!")
+
+    print("Testing 15: POST /api/config/clear (Session cookie clearance)")
+    status, headers, body = simulate_request("/api/config/clear", method="POST")
+    assert status == "200 OK"
+    data = json.loads(body.decode("utf-8"))
+    assert data["success"] is True
+    print("  -> Passed!")
+
+    print("\nALL 15 SIMULATION TESTS PASSED!")
 
 if __name__ == "__main__":
     run_tests()

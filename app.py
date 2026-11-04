@@ -1,6 +1,7 @@
 """
 Klein AI 2.0 - Autonomous Scientific Research Agent
-Hybrid Streamlit Desktop Dashboard & Vercel WSGI Serverless API Application
+Unified Production Vercel Serverless Web Application & REST API
+Zero-Streamlit Architecture: Web Dashboard, Pipeline Orchestration, & Deliverables Runtime
 """
 import os
 import re
@@ -34,6 +35,17 @@ from core.database import (
     save_session,
     delete_session,
     check_db_health,
+    db_create_job,
+    db_get_job,
+    db_list_jobs
+)
+from core.security import (
+    encrypt_user_credentials,
+    decrypt_user_credentials,
+    extract_credentials_from_environ,
+    build_session_cookie,
+    is_custom_secret_configured,
+    COOKIE_NAME
 )
 from core.job_queue import job_manager
 from core.researcher import KleinResearchAgent
@@ -48,12 +60,6 @@ from core.gemini_client import (
 from core.pdf_generator import build_pdf_report
 from core.ppt_generator import build_pptx_deck
 from core.demo_dataset import VERIFIED_DEMO_DATA
-
-# Optional Streamlit runtime check
-try:
-    from streamlit import runtime
-except ImportError:
-    runtime = None
 
 
 # ==============================================================================
@@ -116,376 +122,7 @@ def test_tavily_key(key: str) -> Tuple[bool, str]:
 
 
 # ==============================================================================
-# STREAMLIT DESKTOP DASHBOARD
-# ==============================================================================
-
-def render_streamlit_dashboard():
-    """
-    Interactive Streamlit Web Dashboard for local desktop users.
-    Executed when started via `streamlit run app.py`.
-    """
-    import streamlit as st
-
-    st.set_page_config(
-        page_title=f"{APP_NAME} 2.0 — Autonomous Research Platform",
-        page_icon="🔬",
-        layout="wide",
-        initial_sidebar_state="expanded"
-    )
-
-    # Load custom CSS
-    css_path = Path(__file__).resolve().parent / "assets" / "style.css"
-    if css_path.exists():
-        with open(css_path, "r", encoding="utf-8") as f:
-            st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
-
-    # Initialize Database
-    init_db()
-
-    # Session State Initialization
-    if "research_data" not in st.session_state:
-        st.session_state.research_data = None
-    if "is_researching" not in st.session_state:
-        st.session_state.is_researching = False
-    if "current_step_info" not in st.session_state:
-        st.session_state.current_step_info = {"step": 0, "total": 17, "title": "Idle", "desc": "Ready"}
-    if "live_logs" not in st.session_state:
-        st.session_state.live_logs = []
-    if "topic_input_box" not in st.session_state:
-        st.session_state["topic_input_box"] = "Impact of Artificial Intelligence on Cybersecurity in Healthcare Systems"
-
-    with st.sidebar:
-        st.markdown(f"""
-        <div style="padding: 10px 0 16px 0;">
-            <h2 style="margin: 0; font-size: 1.8rem; font-weight: 800; background: linear-gradient(135deg, #6366F1 0%, #38BDF8 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">{APP_NAME} 2.0</h2>
-            <div style="font-size: 0.8rem; color: #94A3B8; font-weight: 500;">{APP_TAGLINE}</div>
-            <div style="margin-top: 8px;">
-                <span class="badge-pill badge-indigo">17-Step Autonomous Engine</span>
-                <span class="badge-pill badge-cyan">DOI Verified</span>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-
-        st.markdown("---")
-        st.subheader("⚙️ Credentials & Engine")
-
-        env_gemini = get_gemini_api_key()
-        gemini_key_input = st.text_input(
-            "Google Gemini API Key",
-            value=env_gemini,
-            type="password",
-            placeholder="Enter Gemini API key",
-            help="Required for reasoning, literature synthesis, and verification."
-        )
-
-        env_tavily = get_tavily_api_key()
-        tavily_key_input = st.text_input(
-            "Tavily Search API Key",
-            value=env_tavily,
-            type="password",
-            placeholder="Enter Tavily key (Optional)",
-            help="Provides real-time scholarly search. Defaults to DuckDuckGo fallback if blank."
-        )
-
-        selected_model = st.selectbox(
-            "Reasoning Engine Model",
-            options=SUPPORTED_MODELS,
-            index=0,
-            help="Google Gemini 2.5/2.0 Flash recommended for real-time speed and scholarly synthesis."
-        )
-
-        st.markdown("---")
-        db_health = check_db_health()
-        st.markdown(f"**Database:** `{db_health.get('backend', 'sqlite').upper()}` ({'🟢 Connected' if db_health.get('connected') else '🔴 Error'})")
-        
-        st.markdown("---")
-        st.subheader("📚 Saved Sessions")
-        try:
-            saved_list = list_sessions(limit=10)
-            if saved_list:
-                for s in saved_list:
-                    btn_label = f"📄 {s.get('topic', 'Untitled')[:24]}..."
-                    if st.button(btn_label, key=f"hist_{s.get('id')}", use_container_width=True):
-                        sess = get_session(s.get("id"))
-                        if sess and "data" in sess:
-                            st.session_state.research_data = sess["data"]
-                            st.success(f"Loaded: {s.get('topic')}")
-                            st.rerun()
-            else:
-                st.caption("No historical sessions yet.")
-        except Exception:
-            st.caption("Unable to load history.")
-
-    # Main Area
-    st.markdown(f"""
-    <div style="margin-bottom: 24px;">
-        <h1 style="margin: 0; font-size: 2.3rem; font-weight: 800; color: #F8FAFC;">Autonomous Scientific Research Platform</h1>
-        <p style="margin-top: 6px; color: #94A3B8; font-size: 1.05rem;">
-            Autonomous multi-agent literature synthesis, DOI content-negotiation citation audits, research gap extraction, and peer review validation.
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
-
-    c_input, c_btn = st.columns([4, 1])
-    with c_input:
-        topic_input = st.text_input(
-            "Research Topic or Investigation Query",
-            value=st.session_state["topic_input_box"],
-            placeholder="e.g. Zero-Trust Architecture in Critical Cloud Healthcare Infrastructure",
-            label_visibility="collapsed"
-        )
-    with c_btn:
-        run_clicked = st.button("🚀 Start Investigation", use_container_width=True, type="primary")
-
-    c_demo, c_clear = st.columns([1, 4])
-    with c_demo:
-        if st.button("⚡ Load Verified Demo", use_container_width=True):
-            st.session_state.research_data = VERIFIED_DEMO_DATA
-            st.success("Loaded verified empirical demo dataset!")
-            st.rerun()
-
-    if run_clicked:
-        if not topic_input.strip():
-            st.error("Please enter a research topic.")
-        elif not gemini_key_input.strip() and not env_gemini:
-            st.error("Google Gemini API Key is required. Set GEMINI_API_KEY or enter key in sidebar.")
-        else:
-            st.session_state.is_researching = True
-            st.session_state.live_logs = []
-            
-            prog_bar = st.progress(0)
-            status_text = st.empty()
-            log_box = st.empty()
-
-            clean_gemini_key = gemini_key_input.strip() or env_gemini
-
-            def on_step_progress(step, total, title, desc):
-                pct = int((step / total) * 100)
-                prog_bar.progress(pct)
-                status_text.markdown(f"**Step {step}/{total}: {title}** — {desc}")
-
-            def on_log_message(msg):
-                now_str = datetime.now().strftime("%H:%M:%S")
-                st.session_state.live_logs.append(f"[{now_str}] {msg}")
-                recent = st.session_state.live_logs[-8:]
-                log_box.markdown(
-                    f'<div class="terminal-box">' + "<br/>".join(recent) + '</div>',
-                    unsafe_allow_html=True
-                )
-
-            try:
-                agent = KleinResearchAgent(
-                    gemini_api_key=clean_gemini_key,
-                    tavily_api_key=tavily_key_input.strip() or env_tavily,
-                    model=selected_model
-                )
-                with st.spinner("Executing 17-Step Autonomous Scientific Pipeline..."):
-                    results = agent.execute_research(
-                        topic=topic_input.strip(),
-                        step_callback=on_step_progress,
-                        log_callback=on_log_message
-                    )
-                st.session_state.research_data = results
-                st.session_state.is_researching = False
-                prog_bar.progress(100)
-                st.success("✅ Complete Autonomous Investigation Completed! Explore scholarly findings below.")
-                st.rerun()
-            except Exception as e:
-                st.session_state.is_researching = False
-                st.error(f"Research execution failed: {str(e)}")
-
-    # Display Results View
-    data = st.session_state.research_data
-    if data:
-        blueprint = data.get("blueprint", {})
-        sources = data.get("sources", [])
-        gaps = data.get("research_gaps", [])
-        methodology = data.get("methodology", {})
-        comparison = data.get("comparison", {})
-        lit_review = data.get("literature_review", "")
-        full_report = data.get("report_markdown", "")
-        review_audit = data.get("independent_review", {})
-        audited_cits = data.get("audited_citations", [])
-        pdf_bytes = data.get("pdf_bytes")
-        pptx_bytes = data.get("pptx_bytes")
-
-        st.markdown("---")
-
-        # Metrics bar
-        m1, m2, m3, m4, m5 = st.columns(5)
-        with m1:
-            st.markdown(f"""
-            <div class="stat-box">
-                <div class="stat-value">{blueprint.get('domain', 'AI Research')[:14]}</div>
-                <div class="stat-label">Scientific Domain</div>
-            </div>
-            """, unsafe_allow_html=True)
-        with m2:
-            st.markdown(f"""
-            <div class="stat-box">
-                <div class="stat-value">{len(sources)}</div>
-                <div class="stat-label">Sources Harvested</div>
-            </div>
-            """, unsafe_allow_html=True)
-        with m3:
-            st.markdown(f"""
-            <div class="stat-box">
-                <div class="stat-value">{len(blueprint.get('research_questions', []))}</div>
-                <div class="stat-label">Research Questions</div>
-            </div>
-            """, unsafe_allow_html=True)
-        with m4:
-            st.markdown(f"""
-            <div class="stat-box">
-                <div class="stat-value">{len(gaps)}</div>
-                <div class="stat-label">Research Gaps</div>
-            </div>
-            """, unsafe_allow_html=True)
-        with m5:
-            rev_score = review_audit.get("overall_score", 9.2) if review_audit else 9.0
-            st.markdown(f"""
-            <div class="stat-box">
-                <div class="stat-value" style="color: #10B981;">{rev_score}/10</div>
-                <div class="stat-label">Peer Review Score</div>
-            </div>
-            """, unsafe_allow_html=True)
-
-        st.markdown("<br/>", unsafe_allow_html=True)
-
-        # Tabs
-        tab_overview, tab_lit, tab_matrix, tab_gaps, tab_method, tab_review, tab_report, tab_sources, tab_export = st.tabs([
-            "📌 Blueprint", "📚 Literature Review", "📊 Evidence Matrix", "🧭 Research Gaps",
-            "⚙️ Methodology", "🛡️ Peer Review", "📄 Academic Paper", "🔗 Sources & Citations", "📥 Export Center"
-        ])
-
-        with tab_overview:
-            st.markdown(f"### 🎯 Research Blueprint: `{blueprint.get('topic_normalized', 'Topic')}`")
-            st.markdown(f"**Domain Classification:** `{blueprint.get('domain', 'General')}`")
-            st.markdown(f"**Core Hypothesis:**\n> {blueprint.get('core_hypothesis', 'N/A')}")
-            st.markdown("#### ❓ Formal Research Questions")
-            for rq in blueprint.get("research_questions", []):
-                st.markdown(f"- **{rq.get('id', 'RQ')}:** {rq.get('question')}")
-                if rq.get("rationale"):
-                    st.caption(f"Rationale: {rq.get('rationale')}")
-
-        with tab_lit:
-            st.markdown("### 📚 Comprehensive Scholarly Literature Review")
-            st.markdown(lit_review)
-
-        with tab_matrix:
-            st.markdown("### 📊 Comparative Analysis & Evidence Synthesis")
-            themes = comparison.get("themes", [])
-            if themes:
-                for t in themes:
-                    st.markdown(f"#### 🏷️ Theme: {t.get('theme', 'Key Area')}")
-                    st.markdown(f"**Consensus:** {t.get('consensus', 'N/A')}")
-                    st.markdown(f"**Divergent Findings:** {t.get('divergence', 'N/A')}")
-                    st.markdown(f"**Key Citations:** {', '.join(t.get('citations', []))}")
-                    st.markdown("---")
-
-        with tab_gaps:
-            st.markdown("### 🔍 Critical Research Gaps & Strategic Frontiers")
-            for g in gaps:
-                st.markdown(f"""
-                <div class="gap-card">
-                    <span class="gap-id-badge">{g.get('gap_id', 'GAP')}</span>
-                    <strong style="margin-left: 8px; font-size: 1.05rem; color: #F8FAFC;">{g.get('title')}</strong>
-                    <div style="color: #CBD5E1; font-size: 0.9rem; margin-top: 8px;">{g.get('description')}</div>
-                    <div style="margin-top: 8px; font-size: 0.85rem; color: #38BDF8;"><b>Research Opportunity:</b> {g.get('opportunity')}</div>
-                </div>
-                """, unsafe_allow_html=True)
-
-        with tab_method:
-            fname = methodology.get("framework_name", "Klein Framework")
-            st.markdown(f"### ⚙️ Novel Proposed Methodology: `{fname}`")
-            arch = methodology.get("system_architecture", {})
-            if arch.get("overview"):
-                st.markdown(f"**Overview:** {arch.get('overview')}")
-            for c in arch.get("components", []):
-                st.markdown(f"- **{c.get('name')}:** {c.get('role')}")
-
-        with tab_review:
-            st.markdown("### 🛡️ Independent Verification & Peer Review Audit")
-            if review_audit:
-                r1, r2, r3 = st.columns(3)
-                r1.metric("Overall Quality", f"{review_audit.get('overall_score', 'N/A')}/10")
-                r2.metric("Factuality Rating", review_audit.get("factuality_rating", "N/A"))
-                r3.metric("Methodological Novelty", review_audit.get("novelty_assessment", "N/A"))
-                
-                st.markdown(f"**Executive Synthesis:**\n\n{review_audit.get('summary_critique', 'N/A')}")
-                
-                col_s, col_w = st.columns(2)
-                with col_s:
-                    st.markdown("#### ✅ Validated Strengths")
-                    for s in review_audit.get("key_strengths", []):
-                        st.markdown(f"- {s}")
-                with col_w:
-                    st.markdown("#### ⚠️ Identified Limitations")
-                    for w in review_audit.get("key_weaknesses", []):
-                        st.markdown(f"- {w}")
-
-        with tab_report:
-            st.markdown("### 📄 Full Academic Research Report")
-            st.markdown(full_report)
-
-        with tab_sources:
-            st.markdown("### 🔗 Harvested Empirical Sources & Verified Citations")
-            for s in sources:
-                st.markdown(f"- [{s.get('title')}]({s.get('url')}) — *{s.get('domain')}* (Tier: {s.get('quality_tier', 'Standard')})")
-
-            if audited_cits:
-                st.markdown("---")
-                st.markdown("#### 📖 Formal APA 7th Citations")
-                for c in audited_cits:
-                    st.markdown(f"- {c.get('apa_citation')}")
-                st.markdown("#### 🏷️ BibTeX References")
-                all_bib = "\n\n".join([c.get("bibtex", "") for c in audited_cits])
-                st.code(all_bib, language="bibtex")
-
-        with tab_export:
-            st.markdown("### 📥 Download Research Deliverables")
-            if not pdf_bytes and data:
-                pdf_bytes = build_pdf_report(data)
-                data["pdf_bytes"] = pdf_bytes
-            if not pptx_bytes and data:
-                pptx_bytes = build_pptx_deck(data, data.get("slides_data", []))
-                data["pptx_bytes"] = pptx_bytes
-
-            raw_topic_slug = re.sub(r'[^\w\-_]', '_', blueprint.get('topic_normalized', 'KleinAI_Report')[:28])
-
-            col_pdf, col_ppt = st.columns(2)
-            with col_pdf:
-                if pdf_bytes:
-                    st.download_button(
-                        label="📥 Download Academic PDF Whitepaper",
-                        data=pdf_bytes,
-                        file_name=f"KleinAI_{raw_topic_slug}.pdf",
-                        mime="application/pdf",
-                        use_container_width=True
-                    )
-            with col_ppt:
-                if pptx_bytes:
-                    st.download_button(
-                        label="📥 Download PowerPoint Deck (.pptx)",
-                        data=pptx_bytes,
-                        file_name=f"KleinAI_{raw_topic_slug}.pptx",
-                        mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                        use_container_width=True
-                    )
-
-
-# ==============================================================================
-# RUNTIME DISPATCHER
-# ==============================================================================
-try:
-    if runtime and runtime.exists():
-        render_streamlit_dashboard()
-except Exception:
-    pass
-
-
-# ==============================================================================
-# MODERN RESPONSIVE DARK SAAS UI (HTML/CSS/JS)
+# UNIFIED MODERN DARK SAAS WEB INTERFACE (HTML5 / CSS3 / ES6)
 # ==============================================================================
 
 HTML_LANDING_PAGE = """<!DOCTYPE html>
@@ -493,7 +130,7 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Klein AI 2.0 — Autonomous Research Agent</title>
+    <title>Klein AI 2.0 — Autonomous Scientific Research Platform</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🔬</text></svg>">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -524,7 +161,7 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
 
         header {
             position: sticky; top: 0; z-index: 50;
-            background: rgba(11, 15, 25, 0.90); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+            background: rgba(11, 15, 25, 0.92); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
             border-bottom: 1px solid var(--border); padding: 14px 28px;
             display: flex; justify-content: space-between; align-items: center;
         }
@@ -533,7 +170,7 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
         .nav-title { font-size: 1.15rem; font-weight: 800; letter-spacing: -0.02em; background: linear-gradient(135deg, #FFF 20%, #A5B4FC 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
         .nav-badge { font-size: 0.7rem; font-weight: 600; padding: 3px 8px; border-radius: 9999px; background: rgba(99, 102, 241, 0.15); border: 1px solid rgba(99, 102, 241, 0.35); color: #A5B4FC; }
         .nav-links { display: flex; align-items: center; gap: 20px; }
-        .nav-link { color: var(--text-secondary); text-decoration: none; font-size: 0.88rem; font-weight: 500; transition: color 0.15s; }
+        .nav-link { color: var(--text-secondary); text-decoration: none; font-size: 0.88rem; font-weight: 500; transition: color 0.15s; cursor: pointer; }
         .nav-link:hover, .nav-link.active { color: var(--text-primary); }
         .nav-status { display: flex; align-items: center; gap: 8px; font-size: 0.8rem; color: var(--text-secondary); padding: 4px 10px; background: var(--bg-surface); border: 1px solid var(--border); border-radius: 8px; }
         .status-dot { width: 7px; height: 7px; border-radius: 50%; }
@@ -624,7 +261,7 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
         <a href="/" class="nav-brand">
             <span class="nav-logo">🔬</span>
             <span class="nav-title">Klein AI</span>
-            <span class="nav-badge">v2.0.0 Pro</span>
+            <span class="nav-badge">v2.0 Pro Unified</span>
         </a>
         <div class="nav-links">
             <a href="#investigation" class="nav-link active">Investigation</a>
@@ -657,6 +294,10 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
                 </div>
             </div>
 
+            <p style="font-size: 0.84rem; color: var(--text-secondary); margin-bottom: 16px; line-height: 1.5;">
+                🔒 <strong>Zero-Client-Storage Security:</strong> Your API credentials are never saved in browser localStorage. Validated keys are encrypted server-side with authenticated AES-GCM and bound only to a secure, HttpOnly session cookie.
+            </p>
+
             <div id="keyFeedbackBanner" class="banner-alert"></div>
 
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
@@ -670,7 +311,7 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
                 <div class="form-group">
                     <label for="inputTavilyKey">
                         Tavily Search API Key
-                        <span style="font-weight: 400; color: var(--text-muted);">(Optional: provides deep web search; DuckDuckGo fallback if blank)</span>
+                        <span style="font-weight: 400; color: var(--text-muted);">(Optional: provides deep academic web search; DuckDuckGo fallback if blank)</span>
                     </label>
                     <input type="password" id="inputTavilyKey" placeholder="Paste your Tavily key: tvly-...">
                 </div>
@@ -681,7 +322,7 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
                     💾 Save & Validate Credentials
                 </button>
                 <button class="btn-danger" id="btnClearKeys" onclick="clearSavedCredentials()">
-                    🗑️ Clear Saved Keys
+                    🗑️ Clear Session Credentials
                 </button>
                 <span id="keySaveIndicator" style="font-size: 0.8rem; color: var(--text-muted);"></span>
             </div>
@@ -755,19 +396,21 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
             </div>
         </section>
 
-        <!-- Research Results Workspace -->
+        <!-- Research Results Workspace (9 Full Academic Tabs) -->
         <section class="results-container" id="resultsContainer">
             <div class="tabs-header">
-                <button class="tab-btn active" onclick="switchTab('tab-blueprint', event)">📌 Blueprint & Hypothesis</button>
+                <button class="tab-btn active" onclick="switchTab('tab-blueprint', event)">📌 Blueprint</button>
                 <button class="tab-btn" onclick="switchTab('tab-lit', event)">📚 Literature Review</button>
                 <button class="tab-btn" onclick="switchTab('tab-evidence', event)">📊 Evidence Matrix</button>
                 <button class="tab-btn" onclick="switchTab('tab-gaps', event)">🧭 Research Gaps</button>
                 <button class="tab-btn" onclick="switchTab('tab-method', event)">⚙️ Methodology</button>
-                <button class="tab-btn" onclick="switchTab('tab-review', event)">🛡️ Peer Review Audit</button>
+                <button class="tab-btn" onclick="switchTab('tab-review', event)">🛡️ Peer Review</button>
+                <button class="tab-btn" onclick="switchTab('tab-paper', event)">📄 Academic Paper</button>
+                <button class="tab-btn" onclick="switchTab('tab-sources', event)">🔗 Sources & BibTeX</button>
                 <button class="tab-btn" onclick="switchTab('tab-export', event)">📥 Deliverables Export</button>
             </div>
 
-            <!-- Blueprint Tab -->
+            <!-- Tab 1: Blueprint -->
             <div class="tab-panel active" id="tab-blueprint">
                 <div class="card">
                     <h3 style="margin-bottom: 12px; color: var(--accent-cyan);" id="bpDomain">Scientific Domain</h3>
@@ -777,14 +420,14 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
                 </div>
             </div>
 
-            <!-- Literature Review Tab -->
+            <!-- Tab 2: Literature Review -->
             <div class="tab-panel" id="tab-lit">
                 <div class="card">
                     <div class="prose" id="litReviewContent"></div>
                 </div>
             </div>
 
-            <!-- Evidence Matrix Tab -->
+            <!-- Tab 3: Evidence Matrix -->
             <div class="tab-panel" id="tab-evidence">
                 <div class="card">
                     <h3>Empirical Source Verification Matrix</h3>
@@ -807,12 +450,12 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
                 </div>
             </div>
 
-            <!-- Research Gaps Tab -->
+            <!-- Tab 4: Research Gaps -->
             <div class="tab-panel" id="tab-gaps">
                 <div class="card" id="gapsContainer"></div>
             </div>
 
-            <!-- Methodology Tab -->
+            <!-- Tab 5: Methodology -->
             <div class="tab-panel" id="tab-method">
                 <div class="card">
                     <h3 id="methodFrameworkName" style="color: var(--accent-cyan); margin-bottom: 12px;">Proposed Framework</h3>
@@ -822,7 +465,7 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
                 </div>
             </div>
 
-            <!-- Peer Review Tab -->
+            <!-- Tab 6: Peer Review Audit -->
             <div class="tab-panel" id="tab-review">
                 <div class="card">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
@@ -843,7 +486,27 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
                 </div>
             </div>
 
-            <!-- Deliverables Export Tab -->
+            <!-- Tab 7: Academic Paper -->
+            <div class="tab-panel" id="tab-paper">
+                <div class="card">
+                    <h3>Full Academic Research Paper</h3>
+                    <div class="prose" id="fullPaperContent" style="margin-top: 16px;"></div>
+                </div>
+            </div>
+
+            <!-- Tab 8: Sources & BibTeX -->
+            <div class="tab-panel" id="tab-sources">
+                <div class="card">
+                    <h3>Harvested Empirical Sources & Citations</h3>
+                    <div id="sourcesList" style="margin-top: 14px;"></div>
+                    <h4 style="margin: 24px 0 10px 0;">📖 APA 7th Citations</h4>
+                    <div id="apaCitationsList" class="prose"></div>
+                    <h4 style="margin: 24px 0 10px 0;">🏷️ BibTeX References</h4>
+                    <pre style="background: #0A0E17; border: 1px solid var(--border); padding: 16px; border-radius: 8px; overflow-x: auto; font-family: var(--font-mono); font-size: 0.8rem; color: #7DD3FC;" id="bibtexBlock"></pre>
+                </div>
+            </div>
+
+            <!-- Tab 9: Deliverables Export Center -->
             <div class="tab-panel" id="tab-export">
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
                     <div class="deliverable-card">
@@ -873,7 +536,7 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
         <!-- Sessions Library Modal / Section -->
         <section class="card" id="sessionsSection" style="display: none; margin-top: 32px;">
             <div class="card-header">
-                <div class="card-title">📚 Historical Research Sessions</div>
+                <div class="card-title">📚 Historical Research Sessions (Persistent PostgreSQL / Database)</div>
                 <button class="btn-secondary" onclick="document.getElementById('sessionsSection').style.display='none'">✕ Close</button>
             </div>
             <div class="table-responsive">
@@ -893,7 +556,7 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
     </main>
 
     <footer>
-        <div>Klein AI 2.0 — Autonomous Research Agent • College Engineering Project</div>
+        <div>Klein AI 2.0 — Autonomous Research Agent • Production Vercel Platform</div>
         <div style="margin-top: 6px; color: var(--text-muted); font-size: 0.75rem;">
             Powered by Google Gemini 2.5/2.0, Crossref Bibliographic API, DOI Content Negotiation, ReportLab, and python-pptx.
         </div>
@@ -902,6 +565,7 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
     <script>
         let serverGeminiConfigured = false;
         let serverTavilyConfigured = false;
+        let userSessionActive = false;
         let currentSessionId = null;
         let progressInterval = null;
 
@@ -935,36 +599,34 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
         }
 
         // ======================================================================
-        // CREDENTIAL MANAGEMENT & INITIALIZATION
+        // CREDENTIAL MANAGEMENT & INITIALIZATION (Zero localStorage)
         // ======================================================================
 
         async function initHealthAndCredentials() {
             try {
-                const res = await fetch('/api/health');
+                const res = await fetch('/api/config/status');
                 const data = await res.json();
-                serverGeminiConfigured = Boolean(data.gemini_configured);
-                serverTavilyConfigured = Boolean(data.tavily_configured);
 
-                // Check localStorage
-                const userGemini = localStorage.getItem('klein_gemini_api_key') || '';
-                const userTavily = localStorage.getItem('klein_tavily_api_key') || '';
+                serverGeminiConfigured = Boolean(data.server_gemini_configured);
+                serverTavilyConfigured = Boolean(data.server_tavily_configured);
+                const userGemini = Boolean(data.user_gemini_configured);
+                const userTavily = Boolean(data.user_tavily_configured);
+                userSessionActive = userGemini;
 
                 if (userGemini) {
-                    document.getElementById('inputGeminiKey').value = userGemini;
                     document.getElementById('badgeGeminiStatus').className = 'badge-status badge-verified';
-                    document.getElementById('badgeGeminiStatus').textContent = 'Gemini: 🟢 User Key Saved';
+                    document.getElementById('badgeGeminiStatus').textContent = 'Gemini: 🟢 User Session Active';
                 } else if (serverGeminiConfigured) {
                     document.getElementById('badgeGeminiStatus').className = 'badge-status badge-supported';
-                    document.getElementById('badgeGeminiStatus').textContent = 'Gemini: 🟡 Server Configured';
+                    document.getElementById('badgeGeminiStatus').textContent = 'Gemini: 🟡 Server Environment';
                 } else {
                     document.getElementById('badgeGeminiStatus').className = 'badge-status badge-unverified';
                     document.getElementById('badgeGeminiStatus').textContent = 'Gemini: 🔴 Not Configured';
                 }
 
                 if (userTavily) {
-                    document.getElementById('inputTavilyKey').value = userTavily;
                     document.getElementById('badgeTavilyStatus').className = 'badge-status badge-verified';
-                    document.getElementById('badgeTavilyStatus').textContent = 'Tavily: 🟢 User Key Saved';
+                    document.getElementById('badgeTavilyStatus').textContent = 'Tavily: 🟢 User Session Active';
                 } else if (serverTavilyConfigured) {
                     document.getElementById('badgeTavilyStatus').className = 'badge-status badge-supported';
                     document.getElementById('badgeTavilyStatus').textContent = 'Tavily: 🟡 Server Key';
@@ -975,15 +637,14 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
 
                 updateActiveCredentialNotice();
             } catch (e) {
-                console.error('Failed to initialize health/credentials:', e);
+                console.error('Failed to initialize status:', e);
             }
         }
 
         function updateActiveCredentialNotice() {
-            const userGemini = localStorage.getItem('klein_gemini_api_key') || (document.getElementById('inputGeminiKey') ? document.getElementById('inputGeminiKey').value.trim() : '');
             const notice = document.getElementById('activeCredentialNotice');
-            if (userGemini) {
-                notice.innerHTML = '<span style="color: #34D399; font-weight: 600;">🟢 User Key Active</span> (stored locally in your browser)';
+            if (userSessionActive) {
+                notice.innerHTML = '<span style="color: #34D399; font-weight: 600;">🟢 User Encrypted Session Active</span> (AES-GCM secured server cookie)';
             } else if (serverGeminiConfigured) {
                 notice.innerHTML = '<span style="color: #A5B4FC; font-weight: 600;">🟡 Server Key Active</span> (configured in Vercel environment)';
             } else {
@@ -999,7 +660,7 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
 
             hideBanner('keyFeedbackBanner');
 
-            if (!geminiKey) {
+            if (!geminiKey && !serverGeminiConfigured) {
                 showBanner('keyFeedbackBanner', '⚠️ Please enter a Google Gemini API Key before testing.', 'error');
                 document.getElementById('inputGeminiKey').classList.add('input-error');
                 return;
@@ -1007,7 +668,7 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
 
             document.getElementById('inputGeminiKey').classList.remove('input-error');
             btn.disabled = true;
-            btn.innerHTML = '⏳ Testing credentials with Google AI Studio...';
+            btn.innerHTML = '⏳ Validating & encrypting session credentials...';
 
             try {
                 const res = await fetch('/api/config/validate', {
@@ -1022,26 +683,14 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
                 const data = await res.json();
 
                 if (res.ok && data.success) {
-                    // Validated! Save to localStorage
-                    localStorage.setItem('klein_gemini_api_key', geminiKey);
-                    if (tavilyKey) {
-                        localStorage.setItem('klein_tavily_api_key', tavilyKey);
-                    } else {
-                        localStorage.removeItem('klein_tavily_api_key');
-                    }
+                    // Wipe plaintext keys from the input DOM for security
+                    document.getElementById('inputGeminiKey').value = '';
+                    document.getElementById('inputTavilyKey').value = '';
 
-                    document.getElementById('badgeGeminiStatus').className = 'badge-status badge-verified';
-                    document.getElementById('badgeGeminiStatus').textContent = 'Gemini: 🟢 User Key Saved';
-
-                    if (tavilyKey && data.tavily_valid) {
-                        document.getElementById('badgeTavilyStatus').className = 'badge-status badge-verified';
-                        document.getElementById('badgeTavilyStatus').textContent = 'Tavily: 🟢 User Key Saved';
-                    }
-
-                    updateActiveCredentialNotice();
+                    await initHealthAndCredentials();
                     hideBanner('investigationError');
 
-                    showBanner('keyFeedbackBanner', '✅ <strong>Credentials Verified & Saved!</strong> Google Gemini API key authenticated successfully. It will automatically power all research runs.', 'success');
+                    showBanner('keyFeedbackBanner', '✅ <strong>Credentials Verified & Session Encrypted!</strong> Google Gemini API key authenticated successfully and stored in a secure server session cookie. Keys are never saved in localStorage.', 'success');
                 } else {
                     const err = data.error || 'Gemini authentication failed. Please check key validity.';
                     showBanner('keyFeedbackBanner', '❌ <strong>Authentication Failed:</strong> ' + err, 'error');
@@ -1054,36 +703,27 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
             }
         }
 
-        function clearSavedCredentials() {
-            localStorage.removeItem('klein_gemini_api_key');
-            localStorage.removeItem('klein_tavily_api_key');
-            document.getElementById('inputGeminiKey').value = '';
-            document.getElementById('inputTavilyKey').value = '';
-            initHealthAndCredentials();
-            showBanner('keyFeedbackBanner', '🗑️ Saved browser credentials cleared. The system will revert to server environment keys if available.', 'info');
+        async function clearSavedCredentials() {
+            try {
+                await fetch('/api/config/clear', { method: 'POST' });
+                document.getElementById('inputGeminiKey').value = '';
+                document.getElementById('inputTavilyKey').value = '';
+                await initHealthAndCredentials();
+                showBanner('keyFeedbackBanner', '🗑️ Server session cleared. The platform will revert to server environment keys if available.', 'info');
+            } catch (e) {
+                alert('Failed to clear credentials: ' + e.message);
+            }
         }
 
         // ======================================================================
         // RESEARCH PIPELINE EXECUTION
         // ======================================================================
 
-        function getEffectiveGeminiKey() {
-            return (document.getElementById('inputGeminiKey') ? document.getElementById('inputGeminiKey').value.trim() : '') ||
-                   localStorage.getItem('klein_gemini_api_key') || '';
-        }
-
-        function getEffectiveTavilyKey() {
-            return (document.getElementById('inputTavilyKey') ? document.getElementById('inputTavilyKey').value.trim() : '') ||
-                   localStorage.getItem('klein_tavily_api_key') || '';
-        }
-
         async function launchResearch() {
             const topicInput = document.getElementById('topicInput');
             const topic = topicInput.value.trim();
             const model = document.getElementById('modelSelect').value;
             const btn = document.getElementById('btnLaunch');
-            const geminiKey = getEffectiveGeminiKey();
-            const tavilyKey = getEffectiveTavilyKey();
 
             hideBanner('investigationError');
             topicInput.classList.remove('input-error');
@@ -1095,7 +735,7 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
                 return;
             }
 
-            if (!geminiKey && !serverGeminiConfigured) {
+            if (!userSessionActive && !serverGeminiConfigured) {
                 showBanner('investigationError', '⚠️ <strong>Google Gemini API Key Required:</strong> Please paste and save your Gemini API key in the credentials panel above to launch research.', 'error');
                 document.getElementById('credentialsCard').scrollIntoView({ behavior: 'smooth' });
                 document.getElementById('inputGeminiKey').classList.add('input-error');
@@ -1150,8 +790,6 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
                     topic: topic,
                     model: model
                 };
-                if (geminiKey) payload.gemini_api_key = geminiKey;
-                if (tavilyKey) payload.tavily_api_key = tavilyKey;
 
                 const res = await fetch('/api/research', {
                     method: 'POST',
@@ -1214,14 +852,14 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
         }
 
         // ======================================================================
-        // RESULTS RENDERING
+        // RESULTS RENDERING (9 Academic Tabs)
         // ======================================================================
 
         function renderResearchResults(data, sessionId) {
             currentSessionId = sessionId;
             document.getElementById('resultsContainer').style.display = 'block';
 
-            // Blueprint
+            // Tab 1: Blueprint
             const bp = data.blueprint || {};
             document.getElementById('bpDomain').textContent = bp.domain ? ('Domain: ' + bp.domain) : 'General Scientific Research';
             document.getElementById('bpHypothesis').textContent = 'Core Hypothesis: ' + (bp.core_hypothesis || 'Empirical validation of autonomous synthesis.');
@@ -1236,7 +874,7 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
                 qBox.appendChild(el);
             });
 
-            // Literature Review
+            // Tab 2: Literature Review
             const litRaw = data.literature_review || data.report_markdown || 'No synthesis available.';
             document.getElementById('litReviewContent').innerHTML = litRaw
                 .replace(/^### (.*$)/gim, '<h3>$1</h3>')
@@ -1245,7 +883,7 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
                 .split('**').reduce((acc, part, idx) => acc + (idx % 2 === 1 ? '<strong>' + part + '</strong>' : part), '')
                 .split('\n').join('<br/>');
 
-            // Evidence Matrix
+            // Tab 3: Evidence Matrix
             const tbody = document.getElementById('evidenceTableBody');
             tbody.innerHTML = '';
             const cits = data.audited_citations || [];
@@ -1265,9 +903,9 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
                 tbody.appendChild(tr);
             });
 
-            // Gaps
+            // Tab 4: Gaps
             const gapsBox = document.getElementById('gapsContainer');
-            gapsBox.innerHTML = '<h3>Critical Research Gaps & Frontiers</h3>';
+            gapsBox.innerHTML = '<h3>Critical Research Gaps & Strategic Frontiers</h3>';
             (data.research_gaps || []).forEach(g => {
                 const el = document.createElement('div');
                 el.style.background = '#0A0E17';
@@ -1283,7 +921,7 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
                 gapsBox.appendChild(el);
             });
 
-            // Methodology
+            // Tab 5: Methodology
             const meth = data.methodology || {};
             document.getElementById('methodFrameworkName').textContent = 'Methodology: ' + (meth.framework_name || 'Klein Autonomous System');
             document.getElementById('methodOverview').textContent = (meth.system_architecture || {}).overview || 'Autonomous multi-stage empirical architecture.';
@@ -1300,7 +938,7 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
                 compsBox.appendChild(el);
             });
 
-            // Peer Review
+            // Tab 6: Peer Review
             const rev = data.independent_review || {};
             document.getElementById('reviewScore').textContent = (rev.overall_score || 9.2) + ' / 10';
             const sBox = document.getElementById('reviewStrengths');
@@ -1319,7 +957,41 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
             });
             document.getElementById('reviewCritique').textContent = rev.summary_critique || 'The synthesized investigation complies with academic whitepaper standards.';
 
-            // Export Links
+            // Tab 7: Academic Paper
+            const paperRaw = data.report_markdown || litRaw;
+            document.getElementById('fullPaperContent').innerHTML = paperRaw
+                .replace(/^### (.*$)/gim, '<h3>$1</h3>')
+                .replace(/^## (.*$)/gim, '<h2>$1</h2>')
+                .replace(/^# (.*$)/gim, '<h1>$1</h1>')
+                .split('**').reduce((acc, part, idx) => acc + (idx % 2 === 1 ? '<strong>' + part + '</strong>' : part), '')
+                .split('\n').join('<br/>');
+
+            // Tab 8: Sources & BibTeX
+            const sourcesBox = document.getElementById('sourcesList');
+            sourcesBox.innerHTML = '';
+            (data.sources || []).forEach(s => {
+                const div = document.createElement('div');
+                div.style.marginBottom = '8px';
+                div.innerHTML = '• <a href="' + (s.url || '#') + '" target="_blank" style="color: var(--accent-cyan); font-weight: 500;">' + (s.title || 'Source') + '</a>' +
+                    ' — <em style="color: var(--text-secondary);">' + (s.domain || '') + '</em> (Quality Tier: ' + (s.quality_tier || 'Standard') + ')';
+                sourcesBox.appendChild(div);
+            });
+
+            const apaBox = document.getElementById('apaCitationsList');
+            apaBox.innerHTML = '';
+            cits.forEach(c => {
+                if (c.apa_citation) {
+                    const p = document.createElement('p');
+                    p.style.marginBottom = '8px';
+                    p.textContent = c.apa_citation;
+                    apaBox.appendChild(p);
+                }
+            });
+
+            const bibEntries = cits.map(c => c.bibtex || '').filter(Boolean).join('\\n\\n');
+            document.getElementById('bibtexBlock').textContent = bibEntries || '% No BibTeX records generated';
+
+            // Tab 9: Export Deliverables
             if (sessionId) {
                 document.getElementById('btnDownloadPdf').href = '/api/download/pdf?id=' + encodeURIComponent(sessionId);
                 document.getElementById('btnDownloadPptx').href = '/api/download/pptx?id=' + encodeURIComponent(sessionId);
@@ -1349,7 +1021,7 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
                         '<td><span class="badge-status badge-supported">' + (s.model || 'gemini-2.5-flash') + '</span></td>' +
                         '<td style="color: var(--text-muted); font-size: 0.8rem;">' + (s.created_at || 'Recent') + '</td>' +
                         '<td style="display: flex; gap: 6px;">' +
-                        '<button class="btn-secondary" style="padding: 6px 10px; font-size: 0.78rem;" onclick="viewSession(\'' + s.id + '\')">👁️ View</button>' +
+                        '<button class="btn-secondary" style="padding: 6px 10px; font-size: 0.78rem;" onclick="viewSession(\\'' + s.id + '\\')">👁️ View</button>' +
                         '<a href="/api/download/pdf?id=' + encodeURIComponent(s.id) + '" target="_blank"><button class="btn-secondary" style="padding: 6px 10px; font-size: 0.78rem;">📕 PDF</button></a>' +
                         '<a href="/api/download/pptx?id=' + encodeURIComponent(s.id) + '" target="_blank"><button class="btn-secondary" style="padding: 6px 10px; font-size: 0.78rem;">📊 PPTX</button></a>' +
                         '</td>';
@@ -1388,9 +1060,10 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
 
 def app(environ, start_response):
     """
-    WSGI Serverless Application Entrypoint for Vercel deployment and REST API.
-    Provides /api/health, /api/demo, /api/research, /api/jobs/<job_id>, /api/sessions,
-    /api/download/pdf, /api/download/pptx, /api/config/validate, and / HTML landing page.
+    Unified WSGI Serverless Application Entrypoint for Vercel deployment.
+    Provides /api/health, /api/demo, /api/research, /api/jobs, /api/sessions,
+    /api/download/pdf, /api/download/pptx, /api/config/status, /api/config/validate,
+    and / modern web dashboard.
     """
     query_string = environ.get("QUERY_STRING", "")
     params = urllib.parse.parse_qs(query_string)
@@ -1417,9 +1090,10 @@ def app(environ, start_response):
 
     if "?" in raw_path:
         raw_path, qs_extra = raw_path.split("?", 1)
-        if not query_string:
-            query_string = qs_extra
-            params = urllib.parse.parse_qs(query_string)
+        extra_params = urllib.parse.parse_qs(qs_extra)
+        for k, v in extra_params.items():
+            if k not in params:
+                params[k] = v
 
     # Strip trailing slash (unless root)
     if len(raw_path) > 1 and raw_path.endswith("/"):
@@ -1440,170 +1114,221 @@ def app(environ, start_response):
     cors_headers = [
         ("Access-Control-Allow-Origin", allowed_origin),
         ("Access-Control-Allow-Methods", "GET, POST, OPTIONS"),
-        ("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, X-Request-ID"),
-        ("X-Request-ID", request_id)
+        ("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, X-Session-Token"),
+        ("Access-Control-Allow-Credentials", "true"),
     ]
 
-    all_base_headers = cors_headers + SECURITY_HEADERS
-
-    # Preflight CORS
+    # Pre-flight OPTIONS handler
     if method == "OPTIONS":
-        start_response("204 No Content", all_base_headers)
+        start_response("204 No Content", cors_headers + SECURITY_HEADERS)
         return [b""]
 
-    def send_json(data, status="200 OK"):
-        body = json.dumps(data, indent=2, ensure_ascii=False).encode("utf-8")
-        headers = all_base_headers + [
+    # Rate Limiting
+    if not rate_limiter.is_allowed(client_ip, limit=120, window_seconds=60):
+        start_response("429 Too Many Requests", [
             ("Content-Type", "application/json; charset=utf-8"),
-            ("Content-Length", str(len(body)))
-        ]
-        start_response(status, headers)
-        return [body]
-
-    def send_html(html_str, status="200 OK"):
-        body = html_str.encode("utf-8")
-        headers = all_base_headers + [
-            ("Content-Type", "text/html; charset=utf-8"),
-            ("Content-Length", str(len(body)))
-        ]
-        start_response(status, headers)
-        return [body]
-
-    def send_binary(data_bytes, content_type, filename, status="200 OK"):
-        headers = all_base_headers + [
-            ("Content-Type", content_type),
-            ("Content-Length", str(len(data_bytes))),
-            ("Content-Disposition", f'attachment; filename="{filename}"')
-        ]
-        start_response(status, headers)
-        return [data_bytes]
-
-    # Global Rate Limiting
-    endpoint_limit = 15 if "/research" in path else 120
-    if not rate_limiter.is_allowed(client_ip, limit=endpoint_limit, window_seconds=60):
-        return send_json({
-            "success": False,
-            "error": "Rate limit exceeded. Please wait a minute before repeating requests.",
+            ("Retry-After", "60")
+        ] + cors_headers + SECURITY_HEADERS)
+        return [json.dumps({
+            "error": "Rate limit exceeded. Maximum 120 requests per minute.",
+            "status_code": 429,
             "request_id": request_id
-        }, status="429 Too Many Requests")
+        }).encode("utf-8")]
 
-    # 1. ROOT LANDING PAGE & HEALTH CHECK
-    if path in ("/", "/index.html") and method == "GET":
-        accept_header = environ.get("HTTP_ACCEPT", "").lower()
+    # Helper function for JSON responses with optional extra headers (e.g. Set-Cookie)
+    def send_json(data: Any, status: str = "200 OK", extra_headers: Optional[List[Tuple[str, str]]] = None):
+        headers = [
+            ("Content-Type", "application/json; charset=utf-8")
+        ] + cors_headers + SECURITY_HEADERS
+        if extra_headers:
+            headers.extend(extra_headers)
+        start_response(status, headers)
+        return [json.dumps(data, indent=2).encode("utf-8")]
+
+    # Helper function for HTML responses
+    def send_html(html_str: str, status: str = "200 OK", extra_headers: Optional[List[Tuple[str, str]]] = None):
+        headers = [
+            ("Content-Type", "text/html; charset=utf-8")
+        ] + cors_headers + SECURITY_HEADERS
+        if extra_headers:
+            headers.extend(extra_headers)
+        start_response(status, headers)
+        return [html_str.encode("utf-8")]
+
+    # Extract user session credentials (from HttpOnly session cookie or X-Session-Token header)
+    session_creds = extract_credentials_from_environ(environ)
+    user_gemini_key = session_creds.get("gemini_key", "")
+    user_tavily_key = session_creds.get("tavily_key", "")
+    user_id = session_creds.get("user_id", "anonymous")
+
+    # ==========================================================================
+    # ROUTE DISPATCHER
+    # ==========================================================================
+
+    # 1. ROOT LANDING PAGE & UNIFIED WEB DASHBOARD
+    if path == "/" and method == "GET":
+        accept_header = environ.get("HTTP_ACCEPT", "")
+        # If client explicitly requests JSON API overview
         if "application/json" in accept_header and "text/html" not in accept_header:
-            gemini_key = get_gemini_api_key()
-            tavily_key = get_tavily_api_key()
-            db_health = check_db_health()
             return send_json({
-                "status": "healthy",
                 "app": APP_NAME,
-                "tagline": APP_TAGLINE,
+                "service": APP_NAME,
                 "version": APP_VERSION,
-                "gemini_configured": bool(gemini_key),
-                "tavily_configured": bool(tavily_key),
-                "database_connected": bool(db_health.get("connected")),
-                "database_backend": db_health.get("backend", "sqlite"),
-                "default_model": DEFAULT_GEMINI_MODEL,
+                "status": "healthy",
+                "platform": "Vercel Serverless Unified Platform",
                 "endpoints": {
                     "health": "/api/health",
+                    "status": "/api/config/status",
+                    "validate": "/api/config/validate",
                     "demo": "/api/demo",
                     "research": "/api/research",
+                    "jobs": "/api/jobs",
                     "sessions": "/api/sessions"
                 },
                 "request_id": request_id
             })
         return send_html(HTML_LANDING_PAGE)
 
-    # 2. SYSTEM HEALTH & DIAGNOSTICS
+    # 2. HEALTH & DIAGNOSTIC ENDPOINT (/api/health)
     if path in ("/health", "/api/health") and method == "GET":
-        gemini_key = get_gemini_api_key()
-        tavily_key = get_tavily_api_key()
         db_health = check_db_health()
         return send_json({
             "status": "healthy",
             "app": APP_NAME,
+            "service": APP_NAME,
             "version": APP_VERSION,
-            "gemini_configured": bool(gemini_key),
-            "tavily_configured": bool(tavily_key),
-            "database_connected": bool(db_health.get("connected")),
-            "database_backend": db_health.get("backend", "sqlite"),
+            "platform": "Vercel Serverless",
             "default_model": DEFAULT_GEMINI_MODEL,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "database": {
+                "backend": db_health.get("backend", "sqlite"),
+                "connected": db_health.get("connected", False)
+            },
+            "gemini_configured": bool(get_gemini_api_key() or user_gemini_key),
+            "tavily_configured": bool(get_tavily_api_key() or user_tavily_key),
+            "user_session_active": bool(user_gemini_key),
+            "encryption_storage": "encrypted_server_session" if is_custom_secret_configured() else "standard_server_session",
             "supported_models": SUPPORTED_MODELS,
             "request_id": request_id
         })
 
-    # 3. CREDENTIAL CONFIGURATION & LIVE VALIDATION (/api/config/validate, /api/keys/test)
-    if path in ("/api/config/validate", "/api/keys/test") and method == "POST":
-        try:
-            content_length = int(environ.get("CONTENT_LENGTH", 0) or 0)
-        except ValueError:
-            content_length = 0
+    # 3. CONFIGURATION STATUS ENDPOINT (/api/config/status)
+    if path == "/api/config/status" and method == "GET":
+        server_gk = bool(get_gemini_api_key())
+        server_tk = bool(get_tavily_api_key())
+        return send_json({
+            "success": True,
+            "server_gemini_configured": server_gk,
+            "server_tavily_configured": server_tk,
+            "user_gemini_configured": bool(user_gemini_key),
+            "user_tavily_configured": bool(user_tavily_key),
+            "active_gemini_source": "user_session" if user_gemini_key else ("server_env" if server_gk else "none"),
+            "active_tavily_source": "user_session" if user_tavily_key else ("server_env" if server_tk else "duckduckgo_fallback"),
+            "supported_models": SUPPORTED_MODELS,
+            "default_model": DEFAULT_GEMINI_MODEL,
+            "request_id": request_id
+        })
 
-        body_bytes = environ["wsgi.input"].read(content_length) if content_length > 0 else b""
+    # 4. CREDENTIAL VALIDATION & SESSION ENCRYPTION (/api/config/validate, /api/config/gemini, /api/config/tavily, /api/keys/test)
+    if path in ("/api/config/validate", "/api/config/gemini", "/api/config/tavily", "/api/keys/test") and method == "POST":
+        content_type = environ.get("CONTENT_TYPE", "")
+        if "application/json" not in content_type:
+            return send_json({"success": False, "error": "Content-Type must be application/json", "request_id": request_id}, status="415 Unsupported Media Type")
+
         try:
-            payload = json.loads(body_bytes.decode("utf-8")) if body_bytes else {}
+            content_length = int(environ.get("CONTENT_LENGTH", 0))
+            if content_length > MAX_REQUEST_BODY_SIZE:
+                return send_json({"success": False, "error": "Request body exceeds maximum allowed size (64 KB)", "request_id": request_id}, status="413 Payload Too Large")
+            body_bytes = environ["wsgi.input"].read(content_length)
+            body = json.loads(body_bytes.decode("utf-8")) if body_bytes else {}
         except Exception:
-            return send_json({"success": False, "error": "Malformed JSON payload.", "request_id": request_id}, status="400 Bad Request")
+            return send_json({"success": False, "error": "Invalid JSON payload", "request_id": request_id}, status="400 Bad Request")
 
-        gemini_candidate = clean_api_key(payload.get("gemini_api_key"))
-        tavily_candidate = clean_api_key(payload.get("tavily_api_key"))
-        model_candidate = payload.get("model") or DEFAULT_GEMINI_MODEL
+        # Resolve candidate keys (merging newly submitted keys with existing session keys)
+        input_gemini = clean_api_key(body.get("gemini_api_key") or body.get("gemini_key") or "")
+        input_tavily = clean_api_key(body.get("tavily_api_key") or body.get("tavily_key") or "")
+        model = body.get("model", DEFAULT_GEMINI_MODEL)
 
-        if not gemini_candidate:
+        effective_gemini = input_gemini or user_gemini_key or get_gemini_api_key()
+        effective_tavily = input_tavily or user_tavily_key or get_tavily_api_key()
+
+        if not effective_gemini:
             return send_json({
                 "success": False,
-                "error": "Gemini API key is required for verification.",
+                "error": "Google Gemini API Key is required. Please provide a key from Google AI Studio (https://aistudio.google.com/).",
                 "request_id": request_id
             }, status="400 Bad Request")
 
-        # Perform actual live test against Gemini API
-        test_result = GeminiClient.test_connection(api_key=gemini_candidate, model=model_candidate)
-        if not test_result.get("success"):
+        # Live probe test with GeminiClient
+        try:
+            probe_result = GeminiClient.test_connection(api_key=effective_gemini, model=model)
+            if not probe_result.get("success"):
+                return send_json({
+                    "success": False,
+                    "error": probe_result.get("message", "Gemini authentication failed. Please check key validity."),
+                    "provider": "google_gemini",
+                    "request_id": request_id
+                }, status="400 Bad Request")
+        except Exception as e:
+            auth_err = classify_error(e)
             return send_json({
                 "success": False,
-                "gemini_valid": False,
-                "error": test_result.get("message", "Gemini API rejected the key."),
-                "category": test_result.get("category", "AUTH_ERROR"),
+                "error": str(auth_err),
+                "provider": "google_gemini",
                 "request_id": request_id
             }, status="400 Bad Request")
 
-        # If Tavily provided, test it too
-        tavily_ok = True
-        tavily_msg = "Not tested"
-        if tavily_candidate:
-            tavily_ok, tavily_msg = test_tavily_key(tavily_candidate)
+        # Optional Tavily validation
+        tavily_ok, tavily_msg = test_tavily_key(effective_tavily)
+        if effective_tavily and not tavily_ok:
+            return send_json({
+                "success": False,
+                "error": tavily_msg,
+                "provider": "tavily",
+                "request_id": request_id
+            }, status="400 Bad Request")
+
+        # Encrypt valid credentials into secure server-side session token
+        session_token = encrypt_user_credentials(
+            gemini_key=input_gemini or user_gemini_key,
+            tavily_key=input_tavily or user_tavily_key,
+            user_id=user_id
+        )
+        is_https = environ.get("wsgi.url_scheme", "https") == "https"
+        set_cookie_header = ("Set-Cookie", build_session_cookie(session_token, secure=is_https))
 
         return send_json({
             "success": True,
+            "message": "Credentials verified and securely stored in server session cookie.",
             "gemini_valid": True,
-            "gemini_message": test_result.get("message"),
-            "model_tested": test_result.get("model"),
             "tavily_valid": tavily_ok,
-            "tavily_message": tavily_msg,
+            "tavily_status": tavily_msg,
+            "session_active": True,
             "request_id": request_id
-        })
+        }, extra_headers=[set_cookie_header])
 
-    # 4. CONFIGURATION STATUS (/api/config/status)
-    if path in ("/api/config/status", "/api/config") and method == "GET":
+    # 5. CLEAR SESSION CREDENTIALS (/api/config/clear)
+    if path == "/api/config/clear" and method == "POST":
+        is_https = environ.get("wsgi.url_scheme", "https") == "https"
+        clear_cookie_header = ("Set-Cookie", build_session_cookie("", clear=True, secure=is_https))
         return send_json({
-            "server_gemini_configured": bool(get_gemini_api_key()),
-            "server_tavily_configured": bool(get_tavily_api_key()),
-            "default_model": DEFAULT_GEMINI_MODEL,
-            "supported_models": SUPPORTED_MODELS,
+            "success": True,
+            "message": "User session credentials cleared successfully.",
             "request_id": request_id
-        })
+        }, extra_headers=[clear_cookie_header])
 
-    # 5. VERIFIED DEMO DATASET
+    # 6. INSTANT VERIFIED DEMO DATASET (/api/demo)
     if path in ("/demo", "/api/demo") and method == "GET":
         demo_payload = {k: v for k, v in VERIFIED_DEMO_DATA.items() if k not in ("pdf_bytes", "pptx_bytes")}
         return send_json({
             "success": True,
-            "topic": demo_payload.get("topic"),
+            "topic": demo_payload.get("topic", "Impact of Artificial Intelligence on Cybersecurity in Healthcare"),
             "data": demo_payload,
+            "disclaimer": "Empirically verified baseline from peer-reviewed literature. No external API quota consumed.",
             "request_id": request_id
         })
 
-    # 6. SAVED SESSIONS LIST
+    # 7. SAVED SESSIONS LIST (/api/sessions)
     if path in ("/sessions", "/api/sessions") and method == "GET":
         init_db()
         sessions = list_sessions()
@@ -1614,7 +1339,7 @@ def app(environ, start_response):
             "request_id": request_id
         })
 
-    # 7. INDIVIDUAL SESSION RETRIEVAL
+    # 8. INDIVIDUAL SESSION RETRIEVAL (/api/session)
     if path in ("/session", "/api/session") and method == "GET":
         init_db()
         session_id = params.get("id", [None])[0]
@@ -1627,26 +1352,33 @@ def app(environ, start_response):
 
         session = get_session(session_id)
         if session:
-            if "data" in session and isinstance(session["data"], dict):
-                session["data"] = {k: v for k, v in session["data"].items() if k not in ("pdf_bytes", "pptx_bytes")}
             return send_json({"success": True, "session": session, "request_id": request_id})
         return send_json({"success": False, "error": f"Session '{session_id}' not found", "request_id": request_id}, status="404 Not Found")
 
-    # 8. ASYNCHRONOUS JOB POLLING (/api/jobs/<job_id>)
+    # 9. ASYNCHRONOUS JOB POLLING (/api/jobs/<job_id>)
     if path.startswith("/api/jobs/") and method == "GET":
         job_id = path[len("/api/jobs/"):].strip()
         job = job_manager.get_job(job_id)
         if not job:
             return send_json({"success": False, "error": f"Job '{job_id}' not found", "request_id": request_id}, status="404 Not Found")
-        
+
         job_copy = dict(job)
         if job_copy.get("result") and isinstance(job_copy["result"], dict):
             job_copy["result"] = {k: v for k, v in job_copy["result"].items() if k not in ("pdf_bytes", "pptx_bytes")}
 
-        return send_json({"success": True, "job": job_copy, "request_id": request_id})
+        return send_json({
+            "success": True,
+            "job": job_copy,
+            "request_id": request_id
+        })
 
-    # 9. DELIVERABLE DOWNLOADS (/api/download/pdf, /api/download/pptx)
-    if path in ("/api/download/pdf", "/api/download/pptx") and method == "GET":
+    # 10. ASYNCHRONOUS JOBS LIST (/api/jobs)
+    if path == "/api/jobs" and method == "GET":
+        jobs = job_manager.list_jobs(limit=20)
+        return send_json({"success": True, "jobs": jobs, "request_id": request_id})
+
+    # 11. PDF DOWNLOAD ENDPOINT (/api/download/pdf)
+    if path in ("/api/download/pdf", "/download/pdf") and method == "GET":
         init_db()
         session_id = params.get("id", [None])[0]
         if not session_id:
@@ -1659,96 +1391,93 @@ def app(environ, start_response):
             if not session or "data" not in session:
                 return send_json({"success": False, "error": f"Session '{session_id}' not found", "request_id": request_id}, status="404 Not Found")
             sess_data = session["data"]
+
         raw_topic = sess_data.get("blueprint", {}).get("topic_normalized", "Research_Report")
         clean_slug = re.sub(r'[^\w\-_]', '_', raw_topic[:30])
 
-        if path.endswith("/pdf"):
+        pdf_bytes = sess_data.get("pdf_bytes")
+        if not pdf_bytes:
             pdf_bytes = build_pdf_report(sess_data)
-            return send_binary(pdf_bytes, "application/pdf", f"KleinAI_{clean_slug}.pdf")
-        else:
-            pptx_bytes = build_pptx_deck(sess_data, sess_data.get("slides_data", []))
-            return send_binary(
-                pptx_bytes,
-                "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                f"KleinAI_{clean_slug}.pptx"
-            )
 
-    # 10. RESEARCH PIPELINE DISPATCH (/api/research)
-    if path in ("/research", "/api/research") and method == "POST":
-        # Validate Content-Type
+        start_response("200 OK", [
+            ("Content-Type", "application/pdf"),
+            ("Content-Disposition", f'attachment; filename="KleinAI_{clean_slug}.pdf"'),
+            ("Content-Length", str(len(pdf_bytes)))
+        ] + cors_headers + SECURITY_HEADERS)
+        return [pdf_bytes]
+
+    # 12. PPTX DOWNLOAD ENDPOINT (/api/download/pptx)
+    if path in ("/api/download/pptx", "/download/pptx") and method == "GET":
+        init_db()
+        session_id = params.get("id", [None])[0]
+        if not session_id:
+            return send_json({"success": False, "error": "Query parameter 'id' is required", "request_id": request_id}, status="400 Bad Request")
+
+        if session_id == "demo":
+            sess_data = VERIFIED_DEMO_DATA
+        else:
+            session = get_session(session_id)
+            if not session or "data" not in session:
+                return send_json({"success": False, "error": f"Session '{session_id}' not found", "request_id": request_id}, status="404 Not Found")
+            sess_data = session["data"]
+
+        raw_topic = sess_data.get("blueprint", {}).get("topic_normalized", "Research_Presentation")
+        clean_slug = re.sub(r'[^\w\-_]', '_', raw_topic[:30])
+
+        pptx_bytes = sess_data.get("pptx_bytes")
+        if not pptx_bytes:
+            pptx_bytes = build_pptx_deck(sess_data, sess_data.get("slides_data", []))
+
+        start_response("200 OK", [
+            ("Content-Type", "application/vnd.openxmlformats-officedocument.presentationml.presentation"),
+            ("Content-Disposition", f'attachment; filename="KleinAI_{clean_slug}.pptx"'),
+            ("Content-Length", str(len(pptx_bytes)))
+        ] + cors_headers + SECURITY_HEADERS)
+        return [pptx_bytes]
+
+    # 13. RESEARCH PIPELINE EXECUTION & JOB CREATION (/api/research, /api/jobs)
+    if path in ("/api/research", "/research", "/api/jobs") and method == "POST":
         content_type = environ.get("CONTENT_TYPE", "")
         if "application/json" not in content_type:
-            return send_json({
-                "success": False,
-                "error": "Invalid Content-Type. Request body must be 'application/json'.",
-                "request_id": request_id
-            }, status="415 Unsupported Media Type")
+            return send_json({"success": False, "error": "Content-Type must be application/json", "request_id": request_id}, status="415 Unsupported Media Type")
 
-        # Validate Content-Length
         try:
-            content_length = int(environ.get("CONTENT_LENGTH", 0) or 0)
-        except ValueError:
-            content_length = 0
-
-        if content_length > MAX_REQUEST_BODY_SIZE:
-            return send_json({
-                "success": False,
-                "error": f"Payload too large. Request body exceeds {MAX_REQUEST_BODY_SIZE} bytes limit.",
-                "request_id": request_id
-            }, status="413 Payload Too Large")
-
-        body_bytes = environ["wsgi.input"].read(content_length) if content_length > 0 else b""
-        try:
-            payload = json.loads(body_bytes.decode("utf-8")) if body_bytes else {}
+            content_length = int(environ.get("CONTENT_LENGTH", 0))
+            if content_length > MAX_REQUEST_BODY_SIZE:
+                return send_json({"success": False, "error": "Request body exceeds maximum allowed size (64 KB)", "request_id": request_id}, status="413 Payload Too Large")
+            body_bytes = environ["wsgi.input"].read(content_length)
+            body = json.loads(body_bytes.decode("utf-8")) if body_bytes else {}
         except Exception:
-            return send_json({
-                "success": False,
-                "error": "Malformed JSON payload.",
-                "request_id": request_id
-            }, status="400 Bad Request")
+            return send_json({"success": False, "error": "Invalid JSON body", "request_id": request_id}, status="400 Bad Request")
 
-        if not isinstance(payload, dict):
-            return send_json({
-                "success": False,
-                "error": "Request body must be a valid JSON object.",
-                "request_id": request_id
-            }, status="400 Bad Request")
+        topic = body.get("topic", "").strip()
+        if not topic or len(topic) < 3:
+            return send_json({"success": False, "error": "Field 'topic' is required and must be at least 3 characters long", "request_id": request_id}, status="400 Bad Request")
 
-        topic = payload.get("topic")
-        if not isinstance(topic, str) or not (3 <= len(topic.strip()) <= 500):
-            return send_json({
-                "success": False,
-                "error": "Field 'topic' is required and must be a non-empty string between 3 and 500 characters.",
-                "request_id": request_id
-            }, status="400 Bad Request")
-        topic = topic.strip()
-
-        model = payload.get("model") or DEFAULT_GEMINI_MODEL
-        if model not in SUPPORTED_MODELS:
-            return send_json({
-                "success": False,
-                "error": f"Invalid model '{model}'. Supported models: {', '.join(SUPPORTED_MODELS)}",
-                "request_id": request_id
-            }, status="400 Bad Request")
-
-        gemini_key = clean_api_key(payload.get("gemini_api_key")) or get_gemini_api_key()
-        tavily_key = clean_api_key(payload.get("tavily_api_key")) or get_tavily_api_key()
+        # Resolve credentials with priority: body key > decrypted session cookie > server environment
+        gemini_key = clean_api_key(body.get("gemini_api_key") or user_gemini_key or get_gemini_api_key())
+        tavily_key = clean_api_key(body.get("tavily_api_key") or user_tavily_key or get_tavily_api_key())
 
         if not gemini_key:
             return send_json({
                 "success": False,
-                "error": "Gemini API key is required. Configure GEMINI_API_KEY environment variable or pass 'gemini_api_key' in request body.",
+                "error": "Google Gemini API key required. Please configure GEMINI_API_KEY or save key in credentials panel.",
                 "request_id": request_id
-            }, status="400 Bad Request")
+            }, status="401 Unauthorized")
 
-        # Explicit async job queue override (?async=true)
-        is_async = params.get("async", ["false"])[0].lower() in ("true", "1")
+        model = body.get("model", DEFAULT_GEMINI_MODEL)
+        if model not in SUPPORTED_MODELS:
+            model = DEFAULT_GEMINI_MODEL
+
+        # Check if caller explicitly requested asynchronous background job queueing
+        is_async = (path == "/api/jobs") or (params.get("async", ["false"])[0].lower() in ("true", "1"))
         if is_async:
             job_id = job_manager.submit_research_job(
                 topic=topic,
                 gemini_api_key=gemini_key,
                 tavily_api_key=tavily_key,
-                model=model
+                model=model,
+                user_id=user_id
             )
             return send_json({
                 "success": True,
@@ -1759,33 +1488,41 @@ def app(environ, start_response):
                 "request_id": request_id
             }, status="202 Accepted")
 
-        # Synchronous execution (Default: keeps HTTP connection alive so serverless containers complete)
+        # Synchronous execution within active HTTP connection (Vercel maxDuration: 60s)
         try:
-            agent = KleinResearchAgent(gemini_api_key=gemini_key, tavily_api_key=tavily_key, model=model)
-            result = agent.execute_research(topic)
-            cleaned = {k: v for k, v in result.items() if k not in ("pdf_bytes", "pptx_bytes")}
+            agent = KleinResearchAgent(
+                gemini_api_key=gemini_key,
+                tavily_api_key=tavily_key,
+                model=model
+            )
+            results = agent.execute_research(topic=topic)
+            safe_results = {k: v for k, v in results.items() if k not in ("pdf_bytes", "pptx_bytes")}
+
             return send_json({
                 "success": True,
-                "topic": topic,
-                "data": cleaned,
+                "session_id": results.get("session_id"),
+                "data": safe_results,
                 "request_id": request_id
             })
-        except GeminiAuthError as e:
-            return send_json({"success": False, "error": f"API Credential Error: {str(e)}", "request_id": request_id}, status="401 Unauthorized")
-        except GeminiRateLimitError as e:
-            return send_json({"success": False, "error": f"Rate Limit Exceeded: {str(e)}", "request_id": request_id}, status="429 Too Many Requests")
         except Exception as e:
-            return send_json({"success": False, "error": f"Research execution failed: {str(e)}", "request_id": request_id}, status="500 Internal Server Error")
+            classified = classify_error(e, "pipeline_execution")
+            return send_json({
+                "success": False,
+                "error": str(classified),
+                "error_type": classified.__class__.__name__,
+                "request_id": request_id
+            }, status="500 Internal Server Error")
 
-    # 11. ROUTE NOT FOUND
+    # 14. 404 NOT FOUND HANDLER
     return send_json({
         "error": "Not Found",
         "path": path,
         "method": method,
+        "message": f"Endpoint '{path}' is not recognized. Visit '/' for the web interface or '/api/health' for API diagnostics.",
         "request_id": request_id
     }, status="404 Not Found")
 
 
-# Export top-level application variables for Vercel and WSGI servers
+# Primary application export for WSGI and Vercel
 application = app
 handler = app

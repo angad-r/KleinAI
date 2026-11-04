@@ -1,7 +1,8 @@
 """
 Klein AI - Distributed & Local Background Research Job Queue (Version 2.0)
 Provides asynchronous job submission, execution progress tracking, bounded concurrency,
-Redis-backed queue persistence (when REDIS_URL is configured) with thread-safe in-memory fallback.
+PostgreSQL database persistence (via core.database), and Redis-backed queue pub/sub when configured.
+Enforces that job progress and status survive across serverless function instances.
 """
 import os
 import json
@@ -13,12 +14,21 @@ from typing import Dict, Any, Optional, List
 from concurrent.futures import ThreadPoolExecutor
 
 from core.config import REDIS_URL, MAX_CONCURRENT_JOBS, JOB_TIMEOUT_SECONDS
+from core.database import (
+    db_create_job,
+    db_get_job,
+    db_update_job_progress,
+    db_complete_job,
+    db_fail_job,
+    db_list_jobs
+)
 
 
 class JobManager:
     """
     Manages asynchronous research job lifecycles.
     Supports status polling, step progress reporting, checkpoints, and failure recovery.
+    Backed by PostgreSQL / SQLite and optional Redis queue.
     """
     def __init__(self):
         self._lock = threading.Lock()
@@ -36,14 +46,14 @@ class JobManager:
                 self._redis_client = client
                 print(f"[JobQueue] Connected to Redis at {REDIS_URL.split('@')[-1]}")
             except Exception as e:
-                print(f"[JobQueue] Redis connection failed ({e}). Defaulting to thread-safe local queue.")
+                print(f"[JobQueue] Redis connection failed ({e}). Defaulting to database persistence.")
                 self._redis_client = None
 
     def _now_iso(self) -> str:
         return datetime.now(timezone.utc).isoformat()
 
     def create_job(self, topic: str, user_id: str = "anonymous", model: Optional[str] = None) -> str:
-        """Initializes a new job entry and returns its UUIDv4 identifier."""
+        """Initializes a new job entry in database and returns its UUIDv4 identifier."""
         job_id = str(uuid.uuid4())
         job_data = {
             "id": job_id,
@@ -60,6 +70,10 @@ class JobManager:
             "error": None
         }
 
+        # 1. Persist to PostgreSQL / SQLite
+        db_create_job(job_id=job_id, topic=topic, model=model, user_id=user_id)
+
+        # 2. Publish to Redis if configured
         if self._redis_client:
             try:
                 self._redis_client.setex(f"job:{job_id}", JOB_TIMEOUT_SECONDS * 4, json.dumps(job_data))
@@ -67,16 +81,18 @@ class JobManager:
             except Exception as e:
                 print(f"[JobQueue] Redis set error: {e}")
 
+        # 3. Cache in memory
         with self._lock:
             self._memory_jobs[job_id] = job_data
 
         return job_id
 
     def get_job(self, job_id: str) -> Optional[Dict[str, Any]]:
-        """Retrieves current job status, progress, logs, and result."""
+        """Retrieves current job status, progress, logs, and result from DB or Redis."""
         if not job_id:
             return None
 
+        # 1. Try Redis
         if self._redis_client:
             try:
                 raw = self._redis_client.get(f"job:{job_id}")
@@ -85,11 +101,23 @@ class JobManager:
             except Exception as e:
                 print(f"[JobQueue] Redis get error: {e}")
 
+        # 2. Try PostgreSQL / SQLite DB
+        db_job = db_get_job(job_id)
+        if db_job:
+            with self._lock:
+                self._memory_jobs[job_id] = db_job
+            return db_job
+
+        # 3. Fallback to memory
         with self._lock:
             return self._memory_jobs.get(job_id)
 
     def update_progress(self, job_id: str, stage: str, progress: int, log_msg: Optional[str] = None):
         """Updates in-flight job progress percentage, stage description, and log stream."""
+        # 1. Update in DB
+        db_update_job_progress(job_id, stage=stage, progress=progress, log_msg=log_msg)
+
+        # 2. Update memory & Redis
         with self._lock:
             job = self._memory_jobs.get(job_id)
             if job:
@@ -101,7 +129,6 @@ class JobManager:
                 job["updated_at"] = self._now_iso()
                 if log_msg:
                     job["logs"].append(f"[{self._now_iso()}] {log_msg}")
-                    # Keep latest 60 log lines
                     if len(job["logs"]) > 60:
                         job["logs"] = job["logs"][-60:]
 
@@ -113,6 +140,10 @@ class JobManager:
 
     def mark_completed(self, job_id: str, result: Dict[str, Any]):
         """Marks job as completed and stores sanitized research results."""
+        # 1. Update in DB
+        db_complete_job(job_id, result)
+
+        # 2. Update memory & Redis
         with self._lock:
             job = self._memory_jobs.get(job_id)
             if job:
@@ -132,6 +163,10 @@ class JobManager:
 
     def mark_failed(self, job_id: str, error_message: str):
         """Marks job as failed with a sanitized error description."""
+        # 1. Update in DB
+        db_fail_job(job_id, error_message)
+
+        # 2. Update memory & Redis
         with self._lock:
             job = self._memory_jobs.get(job_id)
             if job:
@@ -149,11 +184,14 @@ class JobManager:
                         pass
 
     def list_jobs(self, limit: int = 20) -> List[Dict[str, Any]]:
-        """Lists active and recent research jobs."""
+        """Lists active and recent research jobs from database."""
+        db_jobs = db_list_jobs(limit=limit)
+        if db_jobs:
+            return db_jobs
+
         with self._lock:
             items = list(self._memory_jobs.values())
             items.sort(key=lambda j: j.get("created_at", ""), reverse=True)
-            # Exclude large result payloads for list view
             summary_list = []
             for j in items[:limit]:
                 copy_j = {k: v for k, v in j.items() if k != "result"}
@@ -170,7 +208,7 @@ class JobManager:
         user_id: str = "anonymous"
     ) -> str:
         """
-        Submits a research job to the thread pool worker and returns the job ID immediately.
+        Submits a research job and dispatches worker task.
         """
         job_id = self.create_job(topic, user_id=user_id, model=model)
 

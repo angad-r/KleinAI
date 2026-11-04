@@ -90,6 +90,24 @@ def init_db() -> bool:
                             user_id VARCHAR(64) DEFAULT 'anonymous'
                         )
                     """)
+
+                    # Persistent background research jobs table
+                    cur.execute("""
+                        CREATE TABLE IF NOT EXISTS research_jobs (
+                            id VARCHAR(64) PRIMARY KEY,
+                            topic TEXT NOT NULL,
+                            status VARCHAR(32) NOT NULL,
+                            progress INTEGER DEFAULT 0,
+                            stage TEXT,
+                            logs_json TEXT,
+                            result_json TEXT,
+                            error TEXT,
+                            model VARCHAR(64),
+                            user_id VARCHAR(64) DEFAULT 'anonymous',
+                            created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+                            updated_at TIMESTAMP WITH TIME ZONE NOT NULL
+                        )
+                    """)
                     
                     # Record baseline migration
                     cur.execute("""
@@ -123,6 +141,22 @@ def init_db() -> bool:
                 summary TEXT,
                 data_json TEXT NOT NULL,
                 user_id TEXT DEFAULT 'anonymous'
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS research_jobs (
+                id TEXT PRIMARY KEY,
+                topic TEXT NOT NULL,
+                status TEXT NOT NULL,
+                progress INTEGER DEFAULT 0,
+                stage TEXT,
+                logs_json TEXT,
+                result_json TEXT,
+                error TEXT,
+                model TEXT,
+                user_id TEXT DEFAULT 'anonymous',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
             )
         """)
         # If older schema exists without updated_at or user_id, add them safely
@@ -389,3 +423,325 @@ def delete_session(session_id: str, user_id: Optional[str] = None) -> bool:
     except Exception as e:
         print(f"[Database] SQLite delete_session failed: {e}")
         return False
+
+
+# ==============================================================================
+# PERSISTENT RESEARCH JOBS MANAGEMENT
+# ==============================================================================
+
+def db_create_job(
+    job_id: str,
+    topic: str,
+    model: Optional[str] = None,
+    user_id: str = "anonymous",
+    stage: str = "Queued in Research Engine"
+) -> bool:
+    """Inserts a new research job record into persistent storage."""
+    init_db()
+    now = get_utc_now_iso()
+    initial_logs = json.dumps([f"[{now}] Research job queued."])
+    pool = get_pg_pool()
+    if pool is not None:
+        try:
+            with pool.connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        INSERT INTO research_jobs (
+                            id, topic, status, progress, stage, logs_json,
+                            result_json, error, model, user_id, created_at, updated_at
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (id) DO UPDATE SET
+                            topic = EXCLUDED.topic,
+                            status = EXCLUDED.status,
+                            updated_at = EXCLUDED.updated_at
+                    """, (job_id, topic, "queued", 0, stage, initial_logs, None, None, model, user_id, now, now))
+                    conn.commit()
+            return True
+        except Exception as e:
+            print(f"[Database] PostgreSQL db_create_job error: {e}")
+
+    try:
+        conn = get_sqlite_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT OR REPLACE INTO research_jobs (
+                id, topic, status, progress, stage, logs_json,
+                result_json, error, model, user_id, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (job_id, topic, "queued", 0, stage, initial_logs, None, None, model, user_id, now, now))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"[Database] SQLite db_create_job error: {e}")
+        return False
+
+
+def db_get_job(job_id: str) -> Optional[Dict[str, Any]]:
+    """Retrieves a research job by ID, returning parsed logs and result."""
+    init_db()
+    pool = get_pg_pool()
+    if pool is not None:
+        try:
+            with pool.connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT id, topic, status, progress, stage, logs_json,
+                               result_json, error, model, user_id, created_at, updated_at
+                        FROM research_jobs
+                        WHERE id = %s
+                    """, (job_id,))
+                    row = cur.fetchone()
+                    if row:
+                        return {
+                            "id": row[0],
+                            "topic": row[1],
+                            "status": row[2],
+                            "progress": int(row[3] or 0),
+                            "stage": row[4],
+                            "logs": json.loads(row[5]) if row[5] else [],
+                            "result": json.loads(row[6]) if row[6] else None,
+                            "error": row[7],
+                            "model": row[8],
+                            "user_id": row[9],
+                            "created_at": row[10].isoformat() if hasattr(row[10], "isoformat") else str(row[10]),
+                            "updated_at": row[11].isoformat() if hasattr(row[11], "isoformat") else str(row[11])
+                        }
+        except Exception as e:
+            print(f"[Database] PostgreSQL db_get_job error: {e}")
+
+    try:
+        conn = get_sqlite_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id, topic, status, progress, stage, logs_json,
+                   result_json, error, model, user_id, created_at, updated_at
+            FROM research_jobs
+            WHERE id = ?
+        """, (job_id,))
+        row = cur.fetchone()
+        conn.close()
+        if row:
+            return {
+                "id": row["id"],
+                "topic": row["topic"],
+                "status": row["status"],
+                "progress": int(row["progress"] or 0),
+                "stage": row["stage"],
+                "logs": json.loads(row["logs_json"]) if row["logs_json"] else [],
+                "result": json.loads(row["result_json"]) if row["result_json"] else None,
+                "error": row["error"],
+                "model": row["model"],
+                "user_id": row["user_id"],
+                "created_at": str(row["created_at"]),
+                "updated_at": str(row["updated_at"])
+            }
+    except Exception as e:
+        print(f"[Database] SQLite db_get_job error: {e}")
+
+    return None
+
+
+def db_update_job_progress(
+    job_id: str,
+    stage: str,
+    progress: int,
+    log_msg: Optional[str] = None,
+    status: str = "running"
+) -> bool:
+    """Updates job progress percentage, stage, and appends to the log stream."""
+    existing = db_get_job(job_id)
+    if not existing:
+        return False
+
+    logs = existing.get("logs", [])
+    now = get_utc_now_iso()
+    if log_msg:
+        logs.append(f"[{now}] {log_msg}")
+        if len(logs) > 60:
+            logs = logs[-60:]
+    logs_json = json.dumps(logs)
+    clamped_prog = min(max(int(progress), 0), 100) if progress >= 0 else existing.get("progress", 0)
+
+    pool = get_pg_pool()
+    if pool is not None:
+        try:
+            with pool.connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        UPDATE research_jobs
+                        SET status = %s, progress = %s, stage = %s, logs_json = %s, updated_at = %s
+                        WHERE id = %s
+                    """, (status, clamped_prog, stage, logs_json, now, job_id))
+                    conn.commit()
+            return True
+        except Exception as e:
+            print(f"[Database] PostgreSQL db_update_job_progress error: {e}")
+
+    try:
+        conn = get_sqlite_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE research_jobs
+            SET status = ?, progress = ?, stage = ?, logs_json = ?, updated_at = ?
+            WHERE id = ?
+        """, (status, clamped_prog, stage, logs_json, now, job_id))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"[Database] SQLite db_update_job_progress error: {e}")
+        return False
+
+
+def db_complete_job(job_id: str, result: Dict[str, Any]) -> bool:
+    """Marks a job as completed and stores sanitized research results."""
+    existing = db_get_job(job_id)
+    logs = existing.get("logs", []) if existing else []
+    now = get_utc_now_iso()
+    logs.append(f"[{now}] ✅ Scientific deliverables compiled successfully.")
+    logs_json = json.dumps(logs)
+
+    # Sanitize result to ensure JSON serializable
+    safe_result = {k: v for k, v in result.items() if k not in ("pdf_bytes", "pptx_bytes")}
+    result_json = json.dumps(safe_result)
+
+    pool = get_pg_pool()
+    if pool is not None:
+        try:
+            with pool.connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        UPDATE research_jobs
+                        SET status = %s, progress = 100, stage = %s, logs_json = %s,
+                            result_json = %s, updated_at = %s
+                        WHERE id = %s
+                    """, ("completed", "Research Investigation Completed", logs_json, result_json, now, job_id))
+                    conn.commit()
+            return True
+        except Exception as e:
+            print(f"[Database] PostgreSQL db_complete_job error: {e}")
+
+    try:
+        conn = get_sqlite_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE research_jobs
+            SET status = ?, progress = 100, stage = ?, logs_json = ?,
+                result_json = ?, updated_at = ?
+            WHERE id = ?
+        """, ("completed", "Research Investigation Completed", logs_json, result_json, now, job_id))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"[Database] SQLite db_complete_job error: {e}")
+        return False
+
+
+def db_fail_job(job_id: str, error_message: str) -> bool:
+    """Marks a job as failed with an error message."""
+    existing = db_get_job(job_id)
+    logs = existing.get("logs", []) if existing else []
+    now = get_utc_now_iso()
+    logs.append(f"[{now}] ❌ ERROR: {error_message}")
+    logs_json = json.dumps(logs)
+
+    pool = get_pg_pool()
+    if pool is not None:
+        try:
+            with pool.connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        UPDATE research_jobs
+                        SET status = %s, stage = %s, error = %s, logs_json = %s, updated_at = %s
+                        WHERE id = %s
+                    """, ("failed", "Research Execution Failed", error_message, logs_json, now, job_id))
+                    conn.commit()
+            return True
+        except Exception as e:
+            print(f"[Database] PostgreSQL db_fail_job error: {e}")
+
+    try:
+        conn = get_sqlite_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE research_jobs
+            SET status = ?, stage = ?, error = ?, logs_json = ?, updated_at = ?
+            WHERE id = ?
+        """, ("failed", "Research Execution Failed", error_message, logs_json, now, job_id))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"[Database] SQLite db_fail_job error: {e}")
+        return False
+
+
+def db_list_jobs(limit: int = 20) -> List[Dict[str, Any]]:
+    """Lists recent research jobs without bulky result payloads."""
+    init_db()
+    pool = get_pg_pool()
+    if pool is not None:
+        try:
+            with pool.connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT id, topic, status, progress, stage, error, model,
+                               user_id, created_at, updated_at, (result_json IS NOT NULL) AS has_result
+                        FROM research_jobs
+                        ORDER BY created_at DESC
+                        LIMIT %s
+                    """, (limit,))
+                    rows = cur.fetchall()
+                    return [
+                        {
+                            "id": r[0],
+                            "topic": r[1],
+                            "status": r[2],
+                            "progress": int(r[3] or 0),
+                            "stage": r[4],
+                            "error": r[5],
+                            "model": r[6],
+                            "user_id": r[7],
+                            "created_at": r[8].isoformat() if hasattr(r[8], "isoformat") else str(r[8]),
+                            "updated_at": r[9].isoformat() if hasattr(r[9], "isoformat") else str(r[9]),
+                            "has_result": bool(r[10])
+                        }
+                        for r in rows
+                    ]
+        except Exception as e:
+            print(f"[Database] PostgreSQL db_list_jobs error: {e}")
+
+    try:
+        conn = get_sqlite_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id, topic, status, progress, stage, error, model,
+                   user_id, created_at, updated_at, (result_json IS NOT NULL) AS has_result
+            FROM research_jobs
+            ORDER BY created_at DESC
+            LIMIT ?
+        """, (limit,))
+        rows = cur.fetchall()
+        conn.close()
+        return [
+            {
+                "id": r["id"],
+                "topic": r["topic"],
+                "status": r["status"],
+                "progress": int(r["progress"] or 0),
+                "stage": r["stage"],
+                "error": r["error"],
+                "model": r["model"],
+                "user_id": r["user_id"],
+                "created_at": str(r["created_at"]),
+                "updated_at": str(r["updated_at"]),
+                "has_result": bool(r["has_result"])
+            }
+            for r in rows
+        ]
+    except Exception as e:
+        print(f"[Database] SQLite db_list_jobs error: {e}")
+        return []
+

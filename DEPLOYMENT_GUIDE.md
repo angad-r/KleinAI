@@ -1,183 +1,112 @@
-# Klein AI 2.0 — Production Deployment & Operations Guide
+# Klein AI 2.0 — Production Deployment Guide
 
-This guide covers production deployment of **Klein AI 2.0** on **Vercel** (serverless API runtime), **Neon / Supabase** (PostgreSQL persistence), **Upstash** (Redis job queue), and standalone servers (Docker, Railway, Streamlit GUI).
-
----
-
-## 1. System Architecture Overview
-
-```
-                      +---------------------------------------+
-                      |       Client (Web Browser / API)      |
-                      +---------------------------------------+
-                                          |
-                      HTTPS (TLS 1.3) / JSON / REST / WSS
-                                          |
-                                          v
-                      +---------------------------------------+
-                      |       Vercel Serverless Edge          |
-                      |        app.py (WSGI Handler)          |
-                      +---------------------------------------+
-                                          |
-                  +-----------------------+-----------------------+
-                  |                                               |
-                  v                                               v
-    +---------------------------+                   +---------------------------+
-    |   Neon / Supabase PG      |                   |    Upstash / Redis Queue  |
-    |   (Universal DB Pool)     |                   |    (Job State & Events)   |
-    +---------------------------+                   +---------------------------+
-                  |                                               |
-                  +-----------------------+-----------------------+
-                                          |
-                                          v
-                      +---------------------------------------+
-                      |   Autonomous Multi-Agent Researcher   |
-                      |   - Google Gemini 2.5 / 2.0 Flash     |
-                      |   - Crossref & DOI.org Verification   |
-                      |   - ReportLab PDF & python-pptx       |
-                      +---------------------------------------+
-```
+This guide covers production deployment of **Klein AI 2.0** as a unified web application on **Vercel** with managed **PostgreSQL** persistence and optional background queue infrastructure.
 
 ---
 
-## 2. Environment Variables Specification
+## 1. Architecture Overview
 
-Configure these environment variables in your deployment dashboard (e.g. Vercel Project Settings > Environment Variables):
-
-| Variable | Required | Default | Description |
-| :--- | :--- | :--- | :--- |
-| `GEMINI_API_KEY` | **Yes** | — | Google Gemini API key from [Google AI Studio](https://aistudio.google.com/). |
-| `TAVILY_API_KEY` | Optional | `""` | Tavily search API key for real-time academic queries. Falls back to DuckDuckGo if unset. |
-| `DATABASE_URL` | Recommended | `""` | Managed PostgreSQL connection string (Neon, Supabase, AWS RDS, CockroachDB). Falls back to SQLite if unset. |
-| `REDIS_URL` | Optional | `""` | Redis connection URL for distributed background jobs (Upstash, Redis Cloud). Falls back to thread pool if unset. |
-| `GEMINI_MODEL` | Optional | `gemini-2.5-flash` | Reasoning model. Supported: `gemini-2.5-flash`, `gemini-2.0-flash`, `gemini-1.5-pro`, `gemini-1.5-flash`. |
-| `ALLOWED_ORIGINS` | Optional | `https://kleinai.vercel.app` | Comma-separated list of permitted CORS origins. Use `*` to allow all origins. |
-| `MAX_CONCURRENT_JOBS` | Optional | `4` | Maximum concurrent background research jobs per instance. |
-| `JOB_TIMEOUT_SECONDS` | Optional | `300` | Research job execution timeout in seconds. |
+- **Primary Web Platform:** Vercel Serverless Functions (`app.py`, Python 3.12/3.13 WSGI).
+- **Relational Database:** Managed PostgreSQL (Neon, Supabase, or AWS RDS).
+- **Background Queue (Optional):** Upstash Redis or managed Redis.
+- **Background Worker (Optional):** Standalone persistent container (`worker.py` on Railway, Render, or Docker).
+- **AI Models:** Google Gemini 2.5 Flash, 2.0 Flash, 1.5 Pro via Google AI Studio.
+- **Scholarly Search:** Tavily Search API with DuckDuckGo fallback.
 
 ---
 
-## 3. Step-by-Step Vercel Deployment
+## 2. Environment Variables Configuration
 
-Klein AI includes a preconfigured `vercel.json` optimized for serverless Python execution.
+Configure the following environment variables in your Vercel Project Settings (**Settings → Environment Variables**):
 
-### Step 3.1: Connect Repository to Vercel
-1. Navigate to the [Vercel Dashboard](https://vercel.com/new).
-2. Import the GitHub repository: `https://github.com/angad-r/KleinAI`.
-3. Set Framework Preset to **Other**.
-4. Set Root Directory to `./`.
-
-### Step 3.2: Set Environment Variables
-Add the following in Vercel **Project Settings > Environment Variables**:
-- `GEMINI_API_KEY`: `AIzaSy...`
-- `TAVILY_API_KEY`: `tvly-...` (optional)
-- `DATABASE_URL`: `postgresql://user:password@ep-cool-db.us-east-2.aws.neon.tech/neondb?sslmode=require`
-- `ALLOWED_ORIGINS`: `https://kleinai.vercel.app,https://yourcustomdomain.com`
-
-### Step 3.3: Deploy
-Click **Deploy**. Vercel will install dependencies from `requirements.txt` using Python 3.12/3.13 and deploy the WSGI application entrypoint (`app.py`).
-
-Verify the deployment:
-```bash
-# Check health diagnostics
-curl -s https://kleinai.vercel.app/api/health
-
-# Output:
-# {
-#   "status": "healthy",
-#   "app": "Klein AI",
-#   "version": "2.0.0",
-#   "gemini_configured": true,
-#   "tavily_configured": true,
-#   "database_connected": true,
-#   "database_backend": "postgresql",
-#   "default_model": "gemini-2.5-flash"
-# }
-```
+| Variable | Description | Required? | Example |
+|---|---|---|---|
+| `GEMINI_API_KEY` | Google Gemini API key from Google AI Studio | **Yes** (or provided via user session) | `AIzaSy...` |
+| `DATABASE_URL` | PostgreSQL connection string | **Recommended** (defaults to SQLite fallback) | `postgresql://user:pass@ep-xyz.neon.tech/neondb?sslmode=require` |
+| `SECRET_KEY` | Master secret key for server-side session encryption | **Recommended** | `e1b78c9...32-char-random-string` |
+| `TAVILY_API_KEY` | Tavily Search API key for deep academic search | Optional (defaults to DuckDuckGo) | `tvly-...` |
+| `REDIS_URL` | Redis URL for distributed asynchronous background jobs | Optional | `rediss://default:pass@endpoint.upstash.io:6379` |
+| `GEMINI_MODEL` | Default reasoning engine model | Optional (defaults to `gemini-2.5-flash`) | `gemini-2.5-flash` |
+| `ALLOWED_ORIGINS` | Permitted CORS origins (comma-separated) | Optional | `https://kleinai.vercel.app,http://localhost:3000` |
 
 ---
 
-## 4. Database Setup (Neon PostgreSQL)
+## 3. Vercel Configuration (`vercel.json`)
 
-1. Create a free PostgreSQL instance at [Neon](https://neon.tech/) or [Supabase](https://supabase.com/).
-2. Copy the Connection String URI with pooled connections:
-   ```
-   postgresql://username:password@ep-example-pooler.region.neon.tech/neondb?sslmode=require
-   ```
-3. Set `DATABASE_URL` in your environment.
-4. Klein AI will automatically run migrations upon startup (`init_db()`), creating:
-   - `schema_migrations`
-   - `research_sessions`
+Ensure your `vercel.json` matches this configuration:
+
+```json
+{
+  "version": 2,
+  "functions": {
+    "app.py": {
+      "maxDuration": 60
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/app.py?__path=/$1"
+    }
+  ]
+}
+```
+
+> **Why `maxDuration: 60`?**
+> The 17-step autonomous research pipeline synthesizes scholarly literature and verifies Crossref DOIs. Setting `maxDuration: 60` grants sufficient execution window on Vercel Hobby and Pro tiers.
 
 ---
 
-## 5. Background Worker Deployment (Railway / Docker / VPS)
+## 4. Database Setup (Neon Serverless PostgreSQL)
 
-For long-running research pipelines exceeding serverless function execution limits (10-60 seconds), deploy `worker.py` on a standalone host with Redis.
-
-### Dockerfile Example
-```dockerfile
-FROM python:3.12-slim
-
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-COPY . .
-
-# Run standalone worker
-CMD ["python", "worker.py"]
-```
-
-Run worker:
-```bash
-export GEMINI_API_KEY="AIzaSy..."
-export REDIS_URL="rediss://default:token@region.upstash.io:6379"
-export DATABASE_URL="postgresql://..."
-
-python worker.py
-```
+1. Create a free account at [https://neon.tech/](https://neon.tech/).
+2. Create a new project called `klein-ai-db`.
+3. Copy the **Connection String** (e.g., `postgresql://...neon.tech/neondb?sslmode=require`).
+4. In Vercel, add the environment variable `DATABASE_URL` with this connection string.
+5. Klein AI will automatically run migrations upon startup (`research_sessions` and `research_jobs` tables).
 
 ---
 
-## 6. Local Development & Desktop GUI
+## 5. Deploying to Vercel via Git
 
-### Run Streamlit Web Application
+Deployments are automated through Git:
+
 ```bash
-# Install dependencies
-pip install -r requirements.txt
+# Verify working tree is clean
+git status
 
-# Start interactive local dashboard on port 8501
-streamlit run app.py
-```
-Open [http://localhost:8501](http://localhost:8501) in your browser.
+# Stage all files
+git add .
 
-### Run WSGI Server Locally (Waitress / Gunicorn)
-```bash
-# Windows / Linux with Waitress
-pip install waitress
-waitress-serve --port=5000 app:app
+# Commit changes
+git commit -m "feat(vercel): complete vercel-first migration and remove streamlit dependency"
+
+# Push to production branch
+git push origin main
 ```
-Open [http://localhost:5000](http://localhost:5000) for the modern dark SaaS UI.
+
+Vercel will detect the push, run the build using `requirements.txt`, and deploy the application in under 30 seconds.
 
 ---
 
-## 7. Troubleshooting & Verification
+## 6. Optional: Deploying Standalone Background Worker
 
-### Verifying SSRF Protection
-```bash
-# Verify loopback target is blocked safely
-python -c "from core.search_engine import SearchEngine; print(SearchEngine.is_safe_url('http://169.254.169.254/latest/meta-data/'))"
-# Output: (False, 'Blocked target: IP 169.254.169.254 is link-local or cloud metadata')
-```
+For heavy batch workloads or asynchronous queueing:
 
-### Verifying DOI Content Negotiation
-```bash
-python -c "from core.citation_auditor import CitationAuditor; print(CitationAuditor.query_doi_metadata('10.6028/NIST.SP.800-207'))"
-```
+1. Deploy `worker.py` to **Railway** or **Render**:
+   - Runtime: Python 3.12 / 3.13
+   - Start Command: `python worker.py`
+2. Connect the worker to the same `DATABASE_URL` and `REDIS_URL`.
+3. When users trigger asynchronous research (`POST /api/jobs`), the job is persisted to PostgreSQL, queued in Redis, and executed by the standalone worker while users monitor live progress on `https://kleinai.vercel.app/`.
 
-### Running Test Suite
-```bash
-python -m pytest tests/ -v
-# Output: 53 passed in ~57s
-```
+---
+
+## 7. Verification & Health Monitoring
+
+After deployment, test the following endpoints:
+
+- **Web Dashboard:** `https://kleinai.vercel.app/`
+- **Health Check:** `https://kleinai.vercel.app/api/health`
+- **Config Status:** `https://kleinai.vercel.app/api/config/status`
+- **Demo Whitepaper PDF:** `https://kleinai.vercel.app/api/download/pdf?id=demo`
+- **Demo Slides Deck:** `https://kleinai.vercel.app/api/download/pptx?id=demo`
