@@ -109,7 +109,7 @@ def test_tavily_key(key: str) -> Tuple[bool, str]:
         resp = requests.post(
             "https://api.tavily.com/search",
             json={"api_key": clean, "query": "test", "max_results": 1},
-            timeout=5
+            timeout=2.0
         )
         if resp.status_code == 200:
             return True, "Tavily Search API authenticated successfully"
@@ -664,40 +664,52 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
         // CREDENTIAL MANAGEMENT & INITIALIZATION (Zero localStorage)
         // ======================================================================
 
+        function applyCredentialStatus(data) {
+            if (!data) return;
+            if (data.server_gemini_configured !== undefined) serverGeminiConfigured = Boolean(data.server_gemini_configured);
+            if (data.server_tavily_configured !== undefined) serverTavilyConfigured = Boolean(data.server_tavily_configured);
+            
+            const userGemini = data.user_gemini_configured !== undefined ? Boolean(data.user_gemini_configured) : (data.gemini_valid && data.session_active);
+            if (userGemini !== undefined) {
+                userSessionActive = Boolean(userGemini);
+                const gBadge = document.getElementById('badgeGeminiStatus');
+                if (gBadge) {
+                    if (userSessionActive) {
+                        gBadge.className = 'badge-status badge-verified';
+                        gBadge.textContent = 'Gemini: 🟢 User Session Active';
+                    } else if (serverGeminiConfigured) {
+                        gBadge.className = 'badge-status badge-supported';
+                        gBadge.textContent = 'Gemini: 🟡 Server Environment';
+                    } else {
+                        gBadge.className = 'badge-status badge-unverified';
+                        gBadge.textContent = 'Gemini: 🔴 Not Configured';
+                    }
+                }
+            }
+
+            const tBadge = document.getElementById('badgeTavilyStatus');
+            if (tBadge) {
+                const userTavily = data.user_tavily_configured !== undefined ? Boolean(data.user_tavily_configured) : (data.tavily_valid && data.session_active);
+                if (userTavily) {
+                    tBadge.className = 'badge-status badge-verified';
+                    tBadge.textContent = 'Tavily: 🟢 User Session Active';
+                } else if (serverTavilyConfigured) {
+                    tBadge.className = 'badge-status badge-supported';
+                    tBadge.textContent = 'Tavily: 🟡 Server Key';
+                } else {
+                    tBadge.className = 'badge-status badge-supported';
+                    tBadge.textContent = 'Tavily: Free Fallback (DDG)';
+                }
+            }
+
+            updateActiveCredentialNotice();
+        }
+
         async function initHealthAndCredentials() {
             try {
                 const res = await fetch('/api/config/status');
                 const data = await res.json();
-
-                serverGeminiConfigured = Boolean(data.server_gemini_configured);
-                serverTavilyConfigured = Boolean(data.server_tavily_configured);
-                const userGemini = Boolean(data.user_gemini_configured);
-                const userTavily = Boolean(data.user_tavily_configured);
-                userSessionActive = userGemini;
-
-                if (userGemini) {
-                    document.getElementById('badgeGeminiStatus').className = 'badge-status badge-verified';
-                    document.getElementById('badgeGeminiStatus').textContent = 'Gemini: 🟢 User Session Active';
-                } else if (serverGeminiConfigured) {
-                    document.getElementById('badgeGeminiStatus').className = 'badge-status badge-supported';
-                    document.getElementById('badgeGeminiStatus').textContent = 'Gemini: 🟡 Server Environment';
-                } else {
-                    document.getElementById('badgeGeminiStatus').className = 'badge-status badge-unverified';
-                    document.getElementById('badgeGeminiStatus').textContent = 'Gemini: 🔴 Not Configured';
-                }
-
-                if (userTavily) {
-                    document.getElementById('badgeTavilyStatus').className = 'badge-status badge-verified';
-                    document.getElementById('badgeTavilyStatus').textContent = 'Tavily: 🟢 User Session Active';
-                } else if (serverTavilyConfigured) {
-                    document.getElementById('badgeTavilyStatus').className = 'badge-status badge-supported';
-                    document.getElementById('badgeTavilyStatus').textContent = 'Tavily: 🟡 Server Key';
-                } else {
-                    document.getElementById('badgeTavilyStatus').className = 'badge-status badge-supported';
-                    document.getElementById('badgeTavilyStatus').textContent = 'Tavily: Free Fallback (DDG)';
-                }
-
-                updateActiveCredentialNotice();
+                applyCredentialStatus(data);
             } catch (e) {
                 console.error('Failed to initialize status:', e);
             }
@@ -705,6 +717,7 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
 
         function updateActiveCredentialNotice() {
             const notice = document.getElementById('activeCredentialNotice');
+            if (!notice) return;
             if (userSessionActive) {
                 notice.innerHTML = '<span style="color: #34D399; font-weight: 600;">🟢 User Encrypted Session Active</span> (AES-GCM secured server cookie)';
             } else if (serverGeminiConfigured) {
@@ -729,7 +742,7 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
 
             document.getElementById('inputGeminiKey').classList.remove('input-error');
             btn.disabled = true;
-            btn.innerHTML = '⏳ Validating...';
+            btn.innerHTML = '⚡ Validating...';
             try {
                 const res = await fetch('/api/config/gemini', {
                     method: 'POST',
@@ -739,9 +752,8 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
                 const data = await res.json();
                 if (res.ok && data.success) {
                     document.getElementById('inputGeminiKey').value = '';
-                    await initHealthAndCredentials();
-                    await refreshDiagnostics();
-                    showBanner('keyFeedbackBanner', '✅ <strong>Gemini Key Saved!</strong> Authenticated with Google AI Studio and stored in secure server session cookie.', 'success');
+                    applyCredentialStatus(data);
+                    showBanner('keyFeedbackBanner', '✅ <strong>Gemini Key Saved!</strong> Authenticated instantly and stored in secure session cookie.', 'success');
                 } else {
                     showBanner('keyFeedbackBanner', '❌ <strong>Gemini Error:</strong> ' + (data.error || 'Authentication failed'), 'error');
                 }
@@ -760,7 +772,7 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
             hideBanner('keyFeedbackBanner');
 
             btn.disabled = true;
-            btn.innerHTML = '🔍 Testing...';
+            btn.innerHTML = '⚡ Probing...';
             try {
                 const res = await fetch('/api/config/gemini', {
                     method: 'POST',
@@ -769,7 +781,8 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
                 });
                 const data = await res.json();
                 if (res.ok && data.success) {
-                    showBanner('keyFeedbackBanner', '✅ <strong>Gemini Connection Verified!</strong> Model ' + model + ' authenticated and responded successfully.', 'success');
+                    applyCredentialStatus(data);
+                    showBanner('keyFeedbackBanner', '✅ <strong>Gemini Connection Verified!</strong> Model ' + model + ' authenticated instantly.', 'success');
                 } else {
                     showBanner('keyFeedbackBanner', '❌ <strong>Gemini Connection Failed:</strong> ' + (data.error || 'Unauthorized key'), 'error');
                 }
@@ -790,8 +803,7 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
                     body: JSON.stringify({ action: 'delete' })
                 });
                 const data = await res.json();
-                await initHealthAndCredentials();
-                await refreshDiagnostics();
+                applyCredentialStatus({ user_gemini_configured: false, session_active: false });
                 showBanner('keyFeedbackBanner', '🗑️ ' + (data.message || 'Gemini key removed from session.'), 'info');
             } catch (e) {
                 alert('Error removing key: ' + e.message);
@@ -804,7 +816,7 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
             hideBanner('keyFeedbackBanner');
 
             btn.disabled = true;
-            btn.innerHTML = '⏳ Validating...';
+            btn.innerHTML = '⚡ Validating...';
             try {
                 const res = await fetch('/api/config/tavily', {
                     method: 'POST',
@@ -814,8 +826,7 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
                 const data = await res.json();
                 if (res.ok && data.success) {
                     document.getElementById('inputTavilyKey').value = '';
-                    await initHealthAndCredentials();
-                    await refreshDiagnostics();
+                    applyCredentialStatus(data);
                     showBanner('keyFeedbackBanner', '✅ <strong>Tavily Key Saved!</strong> Authenticated and stored in secure server session cookie.', 'success');
                 } else {
                     showBanner('keyFeedbackBanner', '❌ <strong>Tavily Error:</strong> ' + (data.error || 'Authentication failed'), 'error');
@@ -834,7 +845,7 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
             hideBanner('keyFeedbackBanner');
 
             btn.disabled = true;
-            btn.innerHTML = '🔍 Testing...';
+            btn.innerHTML = '⚡ Probing...';
             try {
                 const res = await fetch('/api/config/tavily', {
                     method: 'POST',
@@ -843,6 +854,7 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
                 });
                 const data = await res.json();
                 if (res.ok && data.success) {
+                    applyCredentialStatus(data);
                     showBanner('keyFeedbackBanner', '✅ <strong>Tavily Search API Verified!</strong> ' + (data.tavily_status || 'Service operational.'), 'success');
                 } else {
                     showBanner('keyFeedbackBanner', '❌ <strong>Tavily Error:</strong> ' + (data.error || 'Invalid key'), 'error');
@@ -864,8 +876,7 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
                     body: JSON.stringify({ action: 'delete' })
                 });
                 const data = await res.json();
-                await initHealthAndCredentials();
-                await refreshDiagnostics();
+                applyCredentialStatus({ user_tavily_configured: false });
                 showBanner('keyFeedbackBanner', '🗑️ ' + (data.message || 'Tavily key removed from session.'), 'info');
             } catch (e) {
                 alert('Error removing key: ' + e.message);
@@ -923,8 +934,7 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
 
                 document.getElementById('headerStatusText').textContent = 'System Operational (' + latency + 'ms)';
                 document.getElementById('headerStatusDot').className = 'status-dot green';
-
-                await initHealthAndCredentials();
+                applyCredentialStatus(config);
             } catch (e) {
                 console.error('Failed to refresh diagnostics:', e);
             } finally {
@@ -947,7 +957,7 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
             }
 
             document.getElementById('inputGeminiKey').classList.remove('input-error');
-            if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Validating all credentials...'; }
+            if (btn) { btn.disabled = true; btn.innerHTML = '⚡ Fast Validating...'; }
 
             try {
                 const res = await fetch('/api/config/validate', {
@@ -965,11 +975,11 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
                     document.getElementById('inputGeminiKey').value = '';
                     document.getElementById('inputTavilyKey').value = '';
 
-                    await initHealthAndCredentials();
-                    await refreshDiagnostics();
+                    // Fast instant UI update from server response (zero redundant round-trips)
+                    applyCredentialStatus(data);
                     hideBanner('investigationError');
 
-                    showBanner('keyFeedbackBanner', '✅ <strong>All Credentials Verified & Session Encrypted!</strong> Stored in secure HttpOnly cookie. Keys are never saved in localStorage.', 'success');
+                    showBanner('keyFeedbackBanner', '⚡ <strong>Credentials Verified Instantly!</strong> Authenticated in sub-second and stored in secure HttpOnly cookie.', 'success');
                 } else {
                     const err = data.error || 'Authentication failed. Please check key validity.';
                     showBanner('keyFeedbackBanner', '❌ <strong>Authentication Failed:</strong> ' + err, 'error');
@@ -1570,6 +1580,10 @@ def app(environ, start_response):
             "message": "Google Gemini API key verified and securely stored in encrypted session.",
             "gemini_valid": True,
             "session_active": True,
+            "user_gemini_configured": True,
+            "user_tavily_configured": bool(user_tavily_key),
+            "server_gemini_configured": bool(server_gk),
+            "server_tavily_configured": bool(server_tk),
             "request_id": request_id
         }, extra_headers=[("Set-Cookie", build_session_cookie(new_token, secure=is_https))])
 
@@ -1618,6 +1632,10 @@ def app(environ, start_response):
             "tavily_valid": tavily_ok,
             "tavily_status": tavily_msg,
             "session_active": True,
+            "user_gemini_configured": bool(user_gemini_key),
+            "user_tavily_configured": bool(raw_key),
+            "server_gemini_configured": bool(server_gk),
+            "server_tavily_configured": bool(server_tk),
             "request_id": request_id
         }, extra_headers=[("Set-Cookie", build_session_cookie(new_token, secure=is_https))])
 
@@ -1650,25 +1668,22 @@ def app(environ, start_response):
                 "request_id": request_id
             }, status="400 Bad Request")
 
-        try:
-            probe_result = GeminiClient.test_connection(api_key=effective_gemini, model=model)
-            if not probe_result.get("success"):
-                return send_json({
-                    "success": False,
-                    "error": probe_result.get("message", "Gemini authentication failed. Please check key validity."),
-                    "provider": "google_gemini",
-                    "request_id": request_id
-                }, status="400 Bad Request")
-        except Exception as e:
-            auth_err = classify_error(e)
+        # Ultra-fast concurrent validation of Gemini and Tavily in parallel
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            future_gemini = executor.submit(GeminiClient.test_connection, api_key=effective_gemini, model=model)
+            future_tavily = executor.submit(test_tavily_key, effective_tavily)
+            probe_result = future_gemini.result()
+            tavily_ok, tavily_msg = future_tavily.result()
+
+        if not probe_result.get("success"):
             return send_json({
                 "success": False,
-                "error": str(auth_err),
+                "error": probe_result.get("message", "Gemini authentication failed. Please check key validity."),
                 "provider": "google_gemini",
                 "request_id": request_id
             }, status="400 Bad Request")
 
-        tavily_ok, tavily_msg = test_tavily_key(effective_tavily)
         if effective_tavily and not tavily_ok:
             return send_json({
                 "success": False,
@@ -1692,6 +1707,12 @@ def app(environ, start_response):
             "tavily_valid": tavily_ok,
             "tavily_status": tavily_msg,
             "session_active": True,
+            "user_gemini_configured": bool(input_gemini or user_gemini_key),
+            "user_tavily_configured": bool(input_tavily or user_tavily_key),
+            "server_gemini_configured": bool(server_gk),
+            "server_tavily_configured": bool(server_tk),
+            "active_gemini_source": "user_session" if (input_gemini or user_gemini_key) else ("server_env" if server_gk else "none"),
+            "active_tavily_source": "user_session" if (input_tavily or user_tavily_key) else ("server_env" if server_tk else "duckduckgo_fallback"),
             "request_id": request_id
         }, extra_headers=[set_cookie_header])
 

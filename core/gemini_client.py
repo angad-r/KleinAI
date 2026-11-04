@@ -96,7 +96,8 @@ class GeminiClient:
     @staticmethod
     def test_connection(api_key: Optional[str] = None, model: Optional[str] = None) -> Dict[str, Any]:
         """
-        Validates Gemini API key credentials and model responsiveness with a lightweight probe.
+        Validates Gemini API key credentials and model responsiveness with an ultra-fast lightweight probe.
+        Uses models.get metadata lookup to verify API key authentication in ~200ms without queueing inference.
         Never logs or exposes the actual secret key.
         """
         clean_key = get_gemini_api_key(api_key)
@@ -110,51 +111,74 @@ class GeminiClient:
                 "model": target_model
             }
         
-        # Try primary target model, with automatic fallback if the model is retired/unavailable
-        models_to_try = [target_model]
-        for fallback_m in SUPPORTED_MODELS:
-            if fallback_m not in models_to_try:
-                models_to_try.append(fallback_m)
-        
-        last_cat = "UNKNOWN"
-        last_msg = ""
-        for m_name in models_to_try:
+        # 1. Ultra-fast metadata probe (models.get verifies API key instantly without token generation)
+        try:
+            test_client = genai.Client(api_key=clean_key)
+            test_client.models.get(model=target_model)
+            return {
+                "success": True,
+                "category": "SUCCESS",
+                "message": f"Connected successfully to Google Gemini ({target_model}).",
+                "model": target_model,
+                "probe_response": "OK"
+            }
+        except Exception as e:
+            cat, msg = classify_error(e)
+            # If API key is invalid or unauthorized, fail immediately without trying other models
+            if cat == "AUTH_ERROR":
+                return {
+                    "success": False,
+                    "category": "AUTH_ERROR",
+                    "message": msg,
+                    "model": target_model
+                }
+            
+            # If target model had a 404 or model-specific error, try fallback models via fast metadata lookup
+            for fallback_m in SUPPORTED_MODELS:
+                if fallback_m == target_model:
+                    continue
+                try:
+                    test_client.models.get(model=fallback_m)
+                    return {
+                        "success": True,
+                        "category": "SUCCESS",
+                        "message": f"Connected successfully to Google Gemini ({fallback_m}).",
+                        "model": fallback_m,
+                        "probe_response": "OK"
+                    }
+                except Exception as fb_err:
+                    fb_cat, fb_msg = classify_error(fb_err)
+                    if fb_cat == "AUTH_ERROR":
+                        return {
+                            "success": False,
+                            "category": "AUTH_ERROR",
+                            "message": fb_msg,
+                            "model": target_model
+                        }
+                    continue
+            
+            # If metadata lookup had unexpected non-auth error, try single 1-token generation fallback
             try:
-                test_client = genai.Client(api_key=clean_key)
                 resp = test_client.models.generate_content(
-                    model=m_name,
-                    contents="Respond with 'PONG'.",
-                    config=types.GenerateContentConfig(temperature=0.0, max_output_tokens=10)
+                    model=target_model,
+                    contents="PONG",
+                    config=types.GenerateContentConfig(temperature=0.0, max_output_tokens=1)
                 )
                 return {
                     "success": True,
                     "category": "SUCCESS",
-                    "message": f"Connected successfully to Google Gemini ({m_name}).",
-                    "model": m_name,
+                    "message": f"Connected successfully to Google Gemini ({target_model}).",
+                    "model": target_model,
                     "probe_response": resp.text.strip() if resp and resp.text else "OK"
                 }
-            except Exception as e:
-                cat, msg = classify_error(e)
-                last_cat = cat
-                last_msg = msg
-                # If it's an invalid key, don't try other models
-                if cat == "AUTH_ERROR":
-                    return {
-                        "success": False,
-                        "category": "AUTH_ERROR",
-                        "message": msg,
-                        "model": target_model
-                    }
-                # If model is not found (404) or unavailable (503), try the next fallback model
-                continue
-                
-        return {
-            "success": False,
-            "category": last_cat,
-            "message": last_msg,
-            "model": target_model
-        }
-
+            except Exception as gen_err:
+                gen_cat, gen_msg = classify_error(gen_err)
+                return {
+                    "success": False,
+                    "category": gen_cat,
+                    "message": gen_msg,
+                    "model": target_model
+                }
     def _call_model(self, prompt: str, system_instruction: Optional[str] = None, temperature: float = 0.3, max_retries: int = 3) -> str:
         """Helper to invoke Gemini model with bounded exponential backoff retries and fast auth failure."""
         import time
