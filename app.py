@@ -1619,7 +1619,11 @@ def app(environ, start_response):
         init_db()
         session_id = params.get("id", [None])[0]
         if not session_id:
-            return send_json({"success": False, "error": "Query parameter 'id' is required"}, status="400 Bad Request")
+            return send_json({"success": False, "error": "Query parameter 'id' is required", "request_id": request_id}, status="400 Bad Request")
+
+        if session_id == "demo":
+            demo_payload = {k: v for k, v in VERIFIED_DEMO_DATA.items() if k not in ("pdf_bytes", "pptx_bytes")}
+            return send_json({"success": True, "session": {"id": "demo", "topic": demo_payload.get("topic"), "data": demo_payload}, "request_id": request_id})
 
         session = get_session(session_id)
         if session:
@@ -1646,13 +1650,15 @@ def app(environ, start_response):
         init_db()
         session_id = params.get("id", [None])[0]
         if not session_id:
-            return send_json({"success": False, "error": "Query parameter 'id' is required"}, status="400 Bad Request")
+            return send_json({"success": False, "error": "Query parameter 'id' is required", "request_id": request_id}, status="400 Bad Request")
 
-        session = get_session(session_id)
-        if not session or "data" not in session:
-            return send_json({"success": False, "error": f"Session '{session_id}' not found"}, status="404 Not Found")
-
-        sess_data = session["data"]
+        if session_id == "demo":
+            sess_data = VERIFIED_DEMO_DATA
+        else:
+            session = get_session(session_id)
+            if not session or "data" not in session:
+                return send_json({"success": False, "error": f"Session '{session_id}' not found", "request_id": request_id}, status="404 Not Found")
+            sess_data = session["data"]
         raw_topic = sess_data.get("blueprint", {}).get("topic_normalized", "Research_Report")
         clean_slug = re.sub(r'[^\w\-_]', '_', raw_topic[:30])
 
