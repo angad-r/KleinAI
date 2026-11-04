@@ -884,6 +884,10 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
                 <label for="topicInput">Research Topic or Investigation Query</label>
                 <input type="text" id="topicInput" placeholder="e.g., Impact of Artificial Intelligence on Cybersecurity in Healthcare" value="Impact of Artificial Intelligence on Cybersecurity in Healthcare">
             </div>
+            <div class="input-group">
+                <label for="apiKeyInput">Google Gemini API Key <span style="color: #64748b; font-weight: 400;">(Optional: uses GEMINI_API_KEY from environment if blank)</span></label>
+                <input type="password" id="apiKeyInput" placeholder="Enter Gemini key or leave blank if configured in Vercel">
+            </div>
             <div class="btn-group">
                 <button id="btnResearch" onclick="executeResearch()">🚀 Execute Live Research</button>
                 <button class="secondary" id="btnDemo" onclick="loadDemoData()">⚡ Instant Demo Simulation</button>
@@ -948,6 +952,7 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
 
         async function executeResearch() {
             const topic = document.getElementById('topicInput').value.trim();
+            const apiKey = (document.getElementById('apiKeyInput') ? document.getElementById('apiKeyInput').value.trim() : '');
             const out = document.getElementById('outputBox');
             const btn = document.getElementById('btnResearch');
             if (!topic) {
@@ -958,10 +963,12 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
             out.style.display = 'block';
             out.textContent = '🔬 Initiating autonomous multi-agent research on: "' + topic + '"...\nThis may take 30-90 seconds. Please wait...';
             try {
+                const payload = { topic: topic };
+                if (apiKey) payload.gemini_api_key = apiKey;
                 const res = await fetch('/api/research', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ topic: topic })
+                    body: JSON.stringify(payload)
                 });
                 const data = await res.json();
                 out.textContent = JSON.stringify(data, null, 2);
@@ -984,7 +991,34 @@ def app(environ, start_response):
     WSGI Serverless Application Entrypoint for Vercel deployment and REST API.
     Provides /api/health, /api/demo, /api/research, /api/sessions, and / HTML landing page.
     """
-    path = environ.get("PATH_INFO", "/") or "/"
+    query_string = environ.get("QUERY_STRING", "")
+    params = urllib.parse.parse_qs(query_string)
+
+    # 1. Determine requested route path (handling Vercel rewrites & script prefixes)
+    if "__path" in params and params["__path"]:
+        raw_path = params["__path"][0]
+    else:
+        raw_path = environ.get("PATH_INFO", "/") or "/"
+
+    # Normalize multiple consecutive slashes
+    while "//" in raw_path:
+        raw_path = raw_path.replace("//", "/")
+
+    # Strip serverless file prefixes if present
+    if raw_path.startswith("/app.py/"):
+        raw_path = "/" + raw_path[8:]
+    elif raw_path.startswith("/app/"):
+        raw_path = "/" + raw_path[5:]
+
+    # Map empty string or script entrypoint path directly to root "/"
+    if raw_path in ("/app.py", "/app", ""):
+        raw_path = "/"
+
+    # Strip trailing slash (unless root)
+    if len(raw_path) > 1 and raw_path.endswith("/"):
+        raw_path = raw_path[:-1]
+
+    path = raw_path
     method = environ.get("REQUEST_METHOD", "GET").upper()
 
     cors_headers = [
@@ -1016,12 +1050,28 @@ def app(environ, start_response):
         start_response(status, headers)
         return [body]
 
-    # Clean path (strip trailing slash if not root)
-    if len(path) > 1 and path.endswith("/"):
-        path = path[:-1]
-
-    # 1. ROOT LANDING PAGE
-    if path == "/" and method == "GET":
+    # 1. ROOT LANDING PAGE & HEALTH CHECK
+    if path in ("/", "/index.html", "/app.py") and method == "GET":
+        accept_header = environ.get("HTTP_ACCEPT", "").lower()
+        # If client explicitly requests JSON without accepting HTML, return diagnostic status
+        if "application/json" in accept_header and "text/html" not in accept_header:
+            gemini_key = get_gemini_api_key()
+            tavily_key = get_tavily_api_key()
+            return send_json({
+                "status": "healthy",
+                "app": APP_NAME,
+                "tagline": APP_TAGLINE,
+                "version": APP_VERSION,
+                "gemini_configured": bool(gemini_key),
+                "tavily_configured": bool(tavily_key),
+                "default_model": DEFAULT_GEMINI_MODEL,
+                "endpoints": {
+                    "health": "/api/health",
+                    "demo": "/api/demo",
+                    "research": "/api/research",
+                    "sessions": "/api/sessions"
+                }
+            })
         return send_html(HTML_LANDING_PAGE)
 
     # 2. SYSTEM HEALTH & DIAGNOSTICS

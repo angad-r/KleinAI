@@ -70,6 +70,41 @@ def test_wsgi_root_landing_page():
     assert "*" in res["headers"].get("Access-Control-Allow-Origin", "")
 
 
+def test_wsgi_root_json_accept_header():
+    """Verify GET / with Accept: application/json returns system health diagnostics JSON."""
+    res = run_wsgi_request("GET", "/", headers={"Accept": "application/json"})
+    assert res["status"] == "200 OK"
+    data = json.loads(res["body_text"])
+    assert data["status"] == "healthy"
+    assert data["app"] == "Klein AI"
+    assert "endpoints" in data
+
+
+def test_wsgi_vercel_rewrite_handling():
+    """Verify Vercel rewrite with __path query parameter maps to the correct routes."""
+    # 1. Root mapped via __path=/
+    res_root = run_wsgi_request("GET", "/app.py", query_string="__path=/")
+    assert res_root["status"] == "200 OK"
+    assert "text/html" in res_root["headers"].get("Content-Type", "")
+
+    # 2. Health check mapped via __path=/api/health
+    res_health = run_wsgi_request("GET", "/app.py", query_string="__path=/api/health")
+    assert res_health["status"] == "200 OK"
+    data_health = json.loads(res_health["body_text"])
+    assert data_health["status"] == "healthy"
+
+    # 3. Demo dataset mapped via __path=/api/demo
+    res_demo = run_wsgi_request("GET", "/app.py", query_string="__path=/api/demo")
+    assert res_demo["status"] == "200 OK"
+    data_demo = json.loads(res_demo["body_text"])
+    assert data_demo["success"] is True
+
+    # 4. Old Vercel unrouted /app.py defaults to root HTML
+    res_legacy = run_wsgi_request("GET", "/app.py", query_string="")
+    assert res_legacy["status"] == "200 OK"
+    assert "text/html" in res_legacy["headers"].get("Content-Type", "")
+
+
 def test_wsgi_health_endpoint():
     """Verify GET /api/health and GET /health return system diagnostics."""
     for path in ("/api/health", "/health"):
