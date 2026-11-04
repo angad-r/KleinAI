@@ -26,7 +26,6 @@ from google.genai import errors
 # 1. API KEY SANITIZATION & MASKING SECURITY
 def test_clean_api_key_placeholders():
     """Verify placeholder values from docs and UI are sanitized to empty."""
-    assert clean_api_key("AIzaSy...") == ""
     assert clean_api_key("your_gemini_api_key_here") == ""
     assert clean_api_key("your_key_here") == ""
     assert clean_api_key("") == ""
@@ -35,22 +34,22 @@ def test_clean_api_key_placeholders():
 
 def test_clean_api_key_quotes_and_whitespace():
     """Verify surrounding quotes and whitespace are trimmed."""
-    assert clean_api_key(' "AIzaSyRealKey123" ') == "AIzaSyRealKey123"
-    assert clean_api_key(" 'AIzaSyRealKey456' ") == "AIzaSyRealKey456"
+    assert clean_api_key(' "MOCK_VALID_KEY_123" ') == "MOCK_VALID_KEY_123"
+    assert clean_api_key(" 'MOCK_VALID_KEY_456' ") == "MOCK_VALID_KEY_456"
 
 
 def test_mask_api_key_security():
     """Verify raw API keys are never exposed in diagnostics or logs."""
-    raw = "AIzaSyB3456789012345678901234567890XYZ"
+    raw = "TEST_DUMMY_SECRET_KEY_1234567890_ABCD"
     masked = mask_api_key(raw)
     assert raw not in masked
-    assert "AIzaSy..." in masked
-    assert "...0XYZ" in masked
+    assert "TEST_D..." in masked
+    assert "...ABCD" in masked
     assert f"{len(raw)} chars" in masked
 
     # Missing and short keys
     assert mask_api_key("") == "Not Configured"
-    assert "Too Short" in mask_api_key("AIza")
+    assert "Too Short" in mask_api_key("TEST")
 
 
 # 2. ERROR CLASSIFICATION
@@ -95,7 +94,7 @@ def test_test_connection_missing_key():
 
 def test_test_connection_invalid_key():
     """Verify test_connection identifies invalid credentials via Google API ClientError."""
-    res = GeminiClient.test_connection(api_key="AIzaSyInvalidFakeKey_000000000000000000")
+    res = GeminiClient.test_connection(api_key="mock_invalid_dummy_key_0000000000")
     assert res["success"] is False
     assert res["category"] == "AUTH_ERROR"
     assert "invalid" in res["message"].lower()
@@ -104,7 +103,7 @@ def test_test_connection_invalid_key():
 # 4. FAST AUTH FAILURE WITHOUT SLOW RETRIES
 def test_fast_auth_failure_no_retries():
     """Verify that GeminiClient raises GeminiAuthError on attempt 1 without slow retries."""
-    client = GeminiClient(api_key="AIzaSyInvalidFakeKey_000000000000000000")
+    client = GeminiClient(api_key="mock_invalid_dummy_key_0000000000")
     with pytest.raises(GeminiAuthError) as exc_info:
         client._call_model("Hello, test!")
     assert "invalid or unauthorized" in str(exc_info.value).lower()

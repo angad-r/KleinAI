@@ -190,17 +190,17 @@ pip install -r requirements.txt
 ---
 
 ## 11. API Key Configuration
-Create a `.env` file in the root workspace directory or enter keys directly in the web UI sidebar:
+Create a `.env` file in the root workspace directory (copy from `.env.example`) or enter keys directly in the web UI sidebar:
 ```env
 # Google Gemini API Key (Required for live reasoning - get free key at https://aistudio.google.com/)
-GEMINI_API_KEY=AIzaSy...
+GEMINI_API_KEY=your_gemini_api_key_here
 
 # Tavily AI Search API Key (Optional - get free key at https://tavily.com/)
 # If omitted, DuckDuckGo search is automatically used!
-TAVILY_API_KEY=tvly-...
+TAVILY_API_KEY=your_tavily_api_key_here
 
 # Default Model Selection
-GEMINI_MODEL=gemini-2.5-flash
+GEMINI_MODEL=gemini-flash-lite-latest
 ```
 
 ---

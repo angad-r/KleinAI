@@ -1,6 +1,40 @@
+# Byte-compiled / optimized / DLL files
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# Environments & virtualenvs
 .env
-klein_research.db
-.streamlit/
+.env.local
+.env.*
+!.env.example
+venv/
+env/
+ENV/
+.venv/
+
+# Secrets, certificates, and credential files
+*.pem
+*.key
+*.cert
+*.pfx
+
+# SQLite databases & local data
+*.db
+*.sqlite3
+
+# Logs & telemetry
 *.log
+.coverage
+.pytest_cache/
+
+# Streamlit local session state
+.streamlit/

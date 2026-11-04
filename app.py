@@ -81,7 +81,7 @@ with st.sidebar:
         "Google Gemini API Key",
         value=env_gemini,
         type="password",
-        placeholder="AIzaSy...",
+        placeholder="Enter Gemini API key",
         help="Required for reasoning, literature review, and synthesis. Free key at https://aistudio.google.com/"
     )
     
@@ -90,7 +90,7 @@ with st.sidebar:
         "Tavily Search API Key",
         value=env_tavily,
         type="password",
-        placeholder="tvly-...",
+        placeholder="Enter Tavily API key (optional)",
         help="Optional for Tavily search. If not provided, DuckDuckGo search is automatically used."
     )
     

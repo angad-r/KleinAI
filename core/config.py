@@ -32,8 +32,9 @@ MAX_TOTAL_SOURCES = 8
 MAX_EXTRACT_CHARS = 4500
 
 KNOWN_PLACEHOLDERS = {
-    "aizasy...", "your_gemini_api_key_here", "your_key_here",
-    "tvly-...", "your_tavily_api_key_here"
+    "your_gemini_api_key_here", "your_key_here",
+    "your_tavily_api_key_here", "your_api_key_here",
+    "placeholder_key", "sample_key"
 }
 
 def clean_api_key(raw_key: str = None) -> str:
