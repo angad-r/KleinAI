@@ -414,10 +414,10 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
                 <div class="form-group">
                     <label for="modelSelect">Synthesis Reasoning Model</label>
                     <select id="modelSelect">
-                        <option value="gemini-2.5-flash" selected>Google Gemini 2.5 Flash (Recommended - Fastest Synthesis)</option>
-                        <option value="gemini-2.0-flash">Google Gemini 2.0 Flash (Deterministic)</option>
+                        <option value="gemini-1.5-flash" selected>Google Gemini 1.5 Flash (Universally Supported - Fast & Generous Free Quota)</option>
+                        <option value="gemini-2.0-flash">Google Gemini 2.0 Flash (Next-Gen Production Engine)</option>
                         <option value="gemini-1.5-pro">Google Gemini 1.5 Pro (Deep Scholarly Reasoning)</option>
-                        <option value="gemini-1.5-flash">Google Gemini 1.5 Flash (Standard)</option>
+                        <option value="gemini-2.5-flash">Google Gemini 2.5 Flash (Experimental Preview Tier)</option>
                     </select>
                 </div>
                 <div class="form-group">

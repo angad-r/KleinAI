@@ -26,7 +26,7 @@ Configure the following environment variables in your Vercel Project Settings (*
 | `SECRET_KEY` | Master secret key for server-side session encryption | **Recommended** | `e1b78c9...32-char-random-string` |
 | `TAVILY_API_KEY` | Tavily Search API key for deep academic search | Optional (defaults to DuckDuckGo) | `tvly-...` |
 | `REDIS_URL` | Redis URL for distributed asynchronous background jobs | Optional | `rediss://default:pass@endpoint.upstash.io:6379` |
-| `GEMINI_MODEL` | Default reasoning engine model | Optional (defaults to `gemini-2.5-flash`) | `gemini-2.5-flash` |
+| `GEMINI_MODEL` | Default reasoning engine model | Optional (defaults to `gemini-1.5-flash`) | `gemini-1.5-flash` |
 | `ALLOWED_ORIGINS` | Permitted CORS origins (comma-separated) | Optional | `https://kleinai.vercel.app,http://localhost:3000` |
 
 ---

@@ -18,18 +18,17 @@ APP_VERSION = "2.0.0"
 # ==============================================================================
 # MODEL CONFIGURATION (SINGLE SOURCE OF TRUTH)
 # ==============================================================================
-# Only officially supported Google Gemini model identifiers
+# Officially supported Google Gemini model identifiers
 SUPPORTED_MODELS: List[str] = [
-    "gemini-2.5-flash",
-    "gemini-2.0-flash",
     "gemini-1.5-flash",
-    "gemini-1.5-pro"
+    "gemini-2.0-flash",
+    "gemini-1.5-pro",
+    "gemini-2.5-flash"
 ]
 
-DEFAULT_GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+DEFAULT_GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
 if DEFAULT_GEMINI_MODEL not in SUPPORTED_MODELS:
-    # Fallback to recommended production default
-    DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
+    DEFAULT_GEMINI_MODEL = "gemini-1.5-flash"
 
 AVAILABLE_MODELS = list(SUPPORTED_MODELS)
 
