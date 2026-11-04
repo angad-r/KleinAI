@@ -88,8 +88,26 @@ python -m pytest tests/ -v
 python -m pytest tests/ --durations=10
 ```
 
-Verify WSGI serverless simulation:
+Verify WSGI serverless simulation (19 comprehensive integration tests):
 ```bash
 python scripts/test_wsgi_sim.py
-python scripts/test_deliverables.py
 ```
+
+### 2.7 Complete Interactive Button & Endpoint Verification
+| Button / UI Control | Action Triggered | Target Endpoint | HTTP Method | Result |
+|---|---|---|---|---|
+| **Save Gemini Key** | Validates & encrypts Gemini API key | `/api/config/gemini` | `POST` | Validated against Google AI Studio, encrypted into HttpOnly cookie |
+| **Test Gemini Connection** | Probes Gemini model responsiveness | `/api/config/gemini` | `POST` | Returns model verification message |
+| **Remove Gemini Key** | Deletes Gemini key from session | `/api/config/gemini` (action: delete) | `POST` | Key wiped from cookie, status reverts to Server/Unconfigured |
+| **Save Tavily Key** | Validates & encrypts Tavily API key | `/api/config/tavily` | `POST` | Validated against Tavily API, saved into cookie |
+| **Test Tavily Connection** | Probes Tavily search endpoint | `/api/config/tavily` | `POST` | Returns search availability status |
+| **Remove Tavily Key** | Deletes Tavily key from session | `/api/config/tavily` (action: delete) | `POST` | Reverts to DuckDuckGo fallback |
+| **Validate All Credentials** | Validates all entered keys | `/api/config/validate` | `POST` | Sets updated encrypted session cookie |
+| **Refresh Diagnostics** | Live ping to DB, Gemini, Tavily | `/api/health` & `/api/config/status` | `GET` | Displays latency & health indicators |
+| **Clear All Credentials** | Completely clears session cookie | `/api/config/clear` | `POST` | Clears cookie (`Max-Age=0`) |
+| **Launch Autonomous Pipeline**| Executes 17-step research agent | `/api/research` | `POST` | Returns complete research session JSON |
+| **Start Demo** | Loads verified empirical dataset | `/api/demo` | `GET` | Renders all 9 analytical tabs in UI |
+| **Research History** | Retrieves saved sessions | `/api/sessions` | `GET` | Populates sessions library table |
+| **View Research** | Inspects prior investigation | `/api/session?id=<id>` | `GET` | Renders session into 9 tabs |
+| **Export PDF** | Downloads publication whitepaper | `/api/download/pdf?id=<id>` | `GET` | Streams ReportLab PDF binary (`%PDF`) |
+| **Export PowerPoint** | Downloads presentation deck | `/api/download/pptx?id=<id>` | `GET` | Streams python-pptx presentation binary |

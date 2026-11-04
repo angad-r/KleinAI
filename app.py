@@ -300,31 +300,93 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
 
             <div id="keyFeedbackBanner" class="banner-alert"></div>
 
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
-                <div class="form-group">
-                    <label for="inputGeminiKey">
-                        Google Gemini API Key
-                        <span style="font-weight: 400; color: var(--text-muted);">(Get free key at <a href="https://aistudio.google.com/" target="_blank" style="color: var(--accent-cyan); text-decoration: underline;">Google AI Studio</a>)</span>
-                    </label>
-                    <input type="password" id="inputGeminiKey" placeholder="Paste your Gemini key: AIzaSy...">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                <!-- Google Gemini Provider Box -->
+                <div style="background: #0D1322; border: 1px solid var(--border); border-radius: 12px; padding: 20px;">
+                    <div class="form-group" style="margin-bottom: 12px;">
+                        <label for="inputGeminiKey">
+                            Google Gemini API Key
+                            <span style="font-weight: 400; color: var(--text-muted);">(Get free key at <a href="https://aistudio.google.com/" target="_blank" style="color: var(--accent-cyan); text-decoration: underline;">AI Studio</a>)</span>
+                        </label>
+                        <input type="password" id="inputGeminiKey" placeholder="Paste your Gemini key: AIzaSy...">
+                    </div>
+                    <div class="btn-row" style="margin-top: 10px; gap: 8px;">
+                        <button class="btn-success" id="btnSaveGeminiKey" style="padding: 8px 14px; font-size: 0.82rem;" onclick="saveGeminiKey()">
+                            💾 Save Gemini Key
+                        </button>
+                        <button class="btn-secondary" id="btnTestGeminiConnection" style="padding: 8px 14px; font-size: 0.82rem;" onclick="testGeminiConnection()">
+                            🔍 Test Connection
+                        </button>
+                        <button class="btn-danger" id="btnRemoveGeminiKey" style="padding: 8px 14px; font-size: 0.82rem;" onclick="removeGeminiKey()">
+                            🗑️ Remove
+                        </button>
+                    </div>
                 </div>
-                <div class="form-group">
-                    <label for="inputTavilyKey">
-                        Tavily Search API Key
-                        <span style="font-weight: 400; color: var(--text-muted);">(Optional: provides deep academic web search; DuckDuckGo fallback if blank)</span>
-                    </label>
-                    <input type="password" id="inputTavilyKey" placeholder="Paste your Tavily key: tvly-...">
+
+                <!-- Tavily Search Provider Box -->
+                <div style="background: #0D1322; border: 1px solid var(--border); border-radius: 12px; padding: 20px;">
+                    <div class="form-group" style="margin-bottom: 12px;">
+                        <label for="inputTavilyKey">
+                            Tavily Search API Key
+                            <span style="font-weight: 400; color: var(--text-muted);">(Optional: deep academic web search; DuckDuckGo fallback)</span>
+                        </label>
+                        <input type="password" id="inputTavilyKey" placeholder="Paste your Tavily key: tvly-...">
+                    </div>
+                    <div class="btn-row" style="margin-top: 10px; gap: 8px;">
+                        <button class="btn-success" id="btnSaveTavilyKey" style="padding: 8px 14px; font-size: 0.82rem;" onclick="saveTavilyKey()">
+                            💾 Save Tavily Key
+                        </button>
+                        <button class="btn-secondary" id="btnTestTavilyConnection" style="padding: 8px 14px; font-size: 0.82rem;" onclick="testTavilyConnection()">
+                            🔍 Test Connection
+                        </button>
+                        <button class="btn-danger" id="btnRemoveTavilyKey" style="padding: 8px 14px; font-size: 0.82rem;" onclick="removeTavilyKey()">
+                            🗑️ Remove
+                        </button>
+                    </div>
                 </div>
             </div>
 
-            <div class="btn-row" style="margin-top: 10px;">
-                <button class="btn-success" id="btnSaveKeys" onclick="saveAndTestCredentials()">
-                    💾 Save & Validate Credentials
+            <div class="btn-row" style="margin-top: 18px; border-top: 1px solid var(--border); padding-top: 16px;">
+                <button class="btn-primary" id="btnValidateAll" onclick="saveAndTestCredentials()">
+                    ⚡ Validate All Credentials
+                </button>
+                <button class="btn-secondary" id="btnRefreshDiagnostics" onclick="refreshDiagnostics()">
+                    🔄 Refresh Diagnostics
                 </button>
                 <button class="btn-danger" id="btnClearKeys" onclick="clearSavedCredentials()">
-                    🗑️ Clear Session Credentials
+                    🗑️ Clear All Credentials
                 </button>
                 <span id="keySaveIndicator" style="font-size: 0.8rem; color: var(--text-muted);"></span>
+            </div>
+        </section>
+
+        <!-- Live System Diagnostics & Infrastructure Section -->
+        <section class="card" id="diagnosticsSection">
+            <div class="card-header">
+                <div class="card-title">🩺 System Diagnostics & Infrastructure Status</div>
+                <button class="btn-secondary" style="padding: 6px 14px; font-size: 0.82rem;" onclick="refreshDiagnostics()">🔄 Re-test Probes</button>
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px;">
+                <div style="background: #0A0E17; border: 1px solid var(--border); border-radius: 10px; padding: 16px;">
+                    <div style="font-size: 0.72rem; text-transform: uppercase; color: var(--text-muted); font-weight: 700;">Database Engine</div>
+                    <div style="font-size: 1.1rem; font-weight: 700; margin-top: 6px;" id="diagDbStatus">Connecting...</div>
+                    <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 4px;" id="diagDbBackend">PostgreSQL / SQLite Storage</div>
+                </div>
+                <div style="background: #0A0E17; border: 1px solid var(--border); border-radius: 10px; padding: 16px;">
+                    <div style="font-size: 0.72rem; text-transform: uppercase; color: var(--text-muted); font-weight: 700;">Gemini Reasoning AI</div>
+                    <div style="font-size: 1.1rem; font-weight: 700; margin-top: 6px;" id="diagGeminiStatus">Detecting...</div>
+                    <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 4px;" id="diagGeminiModel">Google AI Studio Engine</div>
+                </div>
+                <div style="background: #0A0E17; border: 1px solid var(--border); border-radius: 10px; padding: 16px;">
+                    <div style="font-size: 0.72rem; text-transform: uppercase; color: var(--text-muted); font-weight: 700;">Academic Search</div>
+                    <div style="font-size: 1.1rem; font-weight: 700; margin-top: 6px;" id="diagSearchStatus">Detecting...</div>
+                    <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 4px;" id="diagSearchEngine">Tavily / DuckDuckGo Fallback</div>
+                </div>
+                <div style="background: #0A0E17; border: 1px solid var(--border); border-radius: 10px; padding: 16px;">
+                    <div style="font-size: 0.72rem; text-transform: uppercase; color: var(--text-muted); font-weight: 700;">Security Encryption</div>
+                    <div style="font-size: 1.1rem; font-weight: 700; margin-top: 6px; color: var(--accent-emerald);" id="diagSecurityStatus">AES-GCM Authenticated</div>
+                    <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 4px;">Zero LocalStorage Cookie Isolation</div>
+                </div>
             </div>
         </section>
 
@@ -371,10 +433,10 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
                     🚀 Launch Autonomous Pipeline
                 </button>
                 <button class="btn-secondary" id="btnDemo" onclick="loadVerifiedDemo()">
-                    ⚡ Instant Verified Demo (Zero Quota)
+                    ⚡ Start Demo
                 </button>
-                <button class="btn-secondary" onclick="loadSessionsHistory()">
-                    📚 Browse Research Library
+                <button class="btn-secondary" id="btnHistory" onclick="loadSessionsHistory()">
+                    📚 Research History
                 </button>
             </div>
         </section>
@@ -652,23 +714,240 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
             }
         }
 
+        async function saveGeminiKey() {
+            const btn = document.getElementById('btnSaveGeminiKey');
+            const key = document.getElementById('inputGeminiKey').value.trim();
+            const model = document.getElementById('modelSelect').value;
+            hideBanner('keyFeedbackBanner');
+
+            if (!key) {
+                showBanner('keyFeedbackBanner', '⚠️ Please enter a Google Gemini API Key before saving.', 'error');
+                document.getElementById('inputGeminiKey').classList.add('input-error');
+                document.getElementById('inputGeminiKey').focus();
+                return;
+            }
+
+            document.getElementById('inputGeminiKey').classList.remove('input-error');
+            btn.disabled = true;
+            btn.innerHTML = '⏳ Validating...';
+            try {
+                const res = await fetch('/api/config/gemini', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ gemini_api_key: key, model: model })
+                });
+                const data = await res.json();
+                if (res.ok && data.success) {
+                    document.getElementById('inputGeminiKey').value = '';
+                    await initHealthAndCredentials();
+                    await refreshDiagnostics();
+                    showBanner('keyFeedbackBanner', '✅ <strong>Gemini Key Saved!</strong> Authenticated with Google AI Studio and stored in secure server session cookie.', 'success');
+                } else {
+                    showBanner('keyFeedbackBanner', '❌ <strong>Gemini Error:</strong> ' + (data.error || 'Authentication failed'), 'error');
+                }
+            } catch (e) {
+                showBanner('keyFeedbackBanner', '❌ Network error: ' + e.message, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '💾 Save Gemini Key';
+            }
+        }
+
+        async function testGeminiConnection() {
+            const btn = document.getElementById('btnTestGeminiConnection');
+            const key = document.getElementById('inputGeminiKey').value.trim();
+            const model = document.getElementById('modelSelect').value;
+            hideBanner('keyFeedbackBanner');
+
+            btn.disabled = true;
+            btn.innerHTML = '🔍 Testing...';
+            try {
+                const res = await fetch('/api/config/gemini', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ gemini_api_key: key, model: model })
+                });
+                const data = await res.json();
+                if (res.ok && data.success) {
+                    showBanner('keyFeedbackBanner', '✅ <strong>Gemini Connection Verified!</strong> Model ' + model + ' authenticated and responded successfully.', 'success');
+                } else {
+                    showBanner('keyFeedbackBanner', '❌ <strong>Gemini Connection Failed:</strong> ' + (data.error || 'Unauthorized key'), 'error');
+                }
+            } catch (e) {
+                showBanner('keyFeedbackBanner', '❌ Probe error: ' + e.message, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '🔍 Test Connection';
+            }
+        }
+
+        async function removeGeminiKey() {
+            if (!confirm('Remove saved Gemini API key from session?')) return;
+            try {
+                const res = await fetch('/api/config/gemini', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'delete' })
+                });
+                const data = await res.json();
+                await initHealthAndCredentials();
+                await refreshDiagnostics();
+                showBanner('keyFeedbackBanner', '🗑️ ' + (data.message || 'Gemini key removed from session.'), 'info');
+            } catch (e) {
+                alert('Error removing key: ' + e.message);
+            }
+        }
+
+        async function saveTavilyKey() {
+            const btn = document.getElementById('btnSaveTavilyKey');
+            const key = document.getElementById('inputTavilyKey').value.trim();
+            hideBanner('keyFeedbackBanner');
+
+            btn.disabled = true;
+            btn.innerHTML = '⏳ Validating...';
+            try {
+                const res = await fetch('/api/config/tavily', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ tavily_api_key: key })
+                });
+                const data = await res.json();
+                if (res.ok && data.success) {
+                    document.getElementById('inputTavilyKey').value = '';
+                    await initHealthAndCredentials();
+                    await refreshDiagnostics();
+                    showBanner('keyFeedbackBanner', '✅ <strong>Tavily Key Saved!</strong> Authenticated and stored in secure server session cookie.', 'success');
+                } else {
+                    showBanner('keyFeedbackBanner', '❌ <strong>Tavily Error:</strong> ' + (data.error || 'Authentication failed'), 'error');
+                }
+            } catch (e) {
+                showBanner('keyFeedbackBanner', '❌ Network error: ' + e.message, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '💾 Save Tavily Key';
+            }
+        }
+
+        async function testTavilyConnection() {
+            const btn = document.getElementById('btnTestTavilyConnection');
+            const key = document.getElementById('inputTavilyKey').value.trim();
+            hideBanner('keyFeedbackBanner');
+
+            btn.disabled = true;
+            btn.innerHTML = '🔍 Testing...';
+            try {
+                const res = await fetch('/api/config/tavily', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ tavily_api_key: key })
+                });
+                const data = await res.json();
+                if (res.ok && data.success) {
+                    showBanner('keyFeedbackBanner', '✅ <strong>Tavily Search API Verified!</strong> ' + (data.tavily_status || 'Service operational.'), 'success');
+                } else {
+                    showBanner('keyFeedbackBanner', '❌ <strong>Tavily Error:</strong> ' + (data.error || 'Invalid key'), 'error');
+                }
+            } catch (e) {
+                showBanner('keyFeedbackBanner', '❌ Probe error: ' + e.message, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '🔍 Test Connection';
+            }
+        }
+
+        async function removeTavilyKey() {
+            if (!confirm('Remove saved Tavily API key from session?')) return;
+            try {
+                const res = await fetch('/api/config/tavily', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'delete' })
+                });
+                const data = await res.json();
+                await initHealthAndCredentials();
+                await refreshDiagnostics();
+                showBanner('keyFeedbackBanner', '🗑️ ' + (data.message || 'Tavily key removed from session.'), 'info');
+            } catch (e) {
+                alert('Error removing key: ' + e.message);
+            }
+        }
+
+        async function refreshDiagnostics() {
+            const btn = document.getElementById('btnRefreshDiagnostics');
+            if (btn) { btn.disabled = true; btn.innerHTML = '🔄 Probing...'; }
+            try {
+                const start = performance.now();
+                const [healthRes, configRes] = await Promise.all([
+                    fetch('/api/health'),
+                    fetch('/api/config/status')
+                ]);
+                const health = await healthRes.json();
+                const config = await configRes.json();
+                const latency = Math.round(performance.now() - start);
+
+                const dbEl = document.getElementById('diagDbStatus');
+                if (dbEl) {
+                    if (health.database && health.database.connected) {
+                        dbEl.innerHTML = '<span style="color: #34D399;">🟢 ' + health.database.backend.toUpperCase() + ' (Connected)</span>';
+                    } else {
+                        dbEl.innerHTML = '<span style="color: #FB7185;">🔴 ' + (health.database ? health.database.backend : 'Disconnected') + '</span>';
+                    }
+                }
+
+                const gemEl = document.getElementById('diagGeminiStatus');
+                if (gemEl) {
+                    if (config.user_gemini_configured) {
+                        gemEl.innerHTML = '<span style="color: #34D399;">🟢 User Session Active</span>';
+                    } else if (config.server_gemini_configured) {
+                        gemEl.innerHTML = '<span style="color: #A5B4FC;">🟡 Server Environment</span>';
+                    } else {
+                        gemEl.innerHTML = '<span style="color: #FB7185;">🔴 Not Configured</span>';
+                    }
+                }
+
+                const searchEl = document.getElementById('diagSearchStatus');
+                if (searchEl) {
+                    if (config.user_tavily_configured) {
+                        searchEl.innerHTML = '<span style="color: #34D399;">🟢 Tavily User Key</span>';
+                    } else if (config.server_tavily_configured) {
+                        searchEl.innerHTML = '<span style="color: #A5B4FC;">🟡 Tavily Server Key</span>';
+                    } else {
+                        searchEl.innerHTML = '<span style="color: #38BDF8;">🌐 DuckDuckGo Free</span>';
+                    }
+                }
+
+                const secEl = document.getElementById('diagSecurityStatus');
+                if (secEl) {
+                    secEl.textContent = health.encryption_storage === 'encrypted_server_session' ? 'AES-GCM Authenticated (Custom Key)' : 'AES-GCM Session (Standard)';
+                }
+
+                document.getElementById('headerStatusText').textContent = 'System Operational (' + latency + 'ms)';
+                document.getElementById('headerStatusDot').className = 'status-dot green';
+
+                await initHealthAndCredentials();
+            } catch (e) {
+                console.error('Failed to refresh diagnostics:', e);
+            } finally {
+                if (btn) { btn.disabled = false; btn.innerHTML = '🔄 Refresh Diagnostics'; }
+            }
+        }
+
         async function saveAndTestCredentials() {
-            const btn = document.getElementById('btnSaveKeys');
+            const btn = document.getElementById('btnValidateAll');
             const geminiKey = document.getElementById('inputGeminiKey').value.trim();
             const tavilyKey = document.getElementById('inputTavilyKey').value.trim();
             const model = document.getElementById('modelSelect').value;
 
             hideBanner('keyFeedbackBanner');
 
-            if (!geminiKey && !serverGeminiConfigured) {
+            if (!geminiKey && !serverGeminiConfigured && !userSessionActive) {
                 showBanner('keyFeedbackBanner', '⚠️ Please enter a Google Gemini API Key before testing.', 'error');
                 document.getElementById('inputGeminiKey').classList.add('input-error');
                 return;
             }
 
             document.getElementById('inputGeminiKey').classList.remove('input-error');
-            btn.disabled = true;
-            btn.innerHTML = '⏳ Validating & encrypting session credentials...';
+            if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Validating all credentials...'; }
 
             try {
                 const res = await fetch('/api/config/validate', {
@@ -683,32 +962,33 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
                 const data = await res.json();
 
                 if (res.ok && data.success) {
-                    // Wipe plaintext keys from the input DOM for security
                     document.getElementById('inputGeminiKey').value = '';
                     document.getElementById('inputTavilyKey').value = '';
 
                     await initHealthAndCredentials();
+                    await refreshDiagnostics();
                     hideBanner('investigationError');
 
-                    showBanner('keyFeedbackBanner', '✅ <strong>Credentials Verified & Session Encrypted!</strong> Google Gemini API key authenticated successfully and stored in a secure server session cookie. Keys are never saved in localStorage.', 'success');
+                    showBanner('keyFeedbackBanner', '✅ <strong>All Credentials Verified & Session Encrypted!</strong> Stored in secure HttpOnly cookie. Keys are never saved in localStorage.', 'success');
                 } else {
-                    const err = data.error || 'Gemini authentication failed. Please check key validity.';
+                    const err = data.error || 'Authentication failed. Please check key validity.';
                     showBanner('keyFeedbackBanner', '❌ <strong>Authentication Failed:</strong> ' + err, 'error');
                 }
             } catch (e) {
                 showBanner('keyFeedbackBanner', '❌ Network error during key verification: ' + e.message, 'error');
             } finally {
-                btn.disabled = false;
-                btn.innerHTML = '💾 Save & Validate Credentials';
+                if (btn) { btn.disabled = false; btn.innerHTML = '⚡ Validate All Credentials'; }
             }
         }
 
         async function clearSavedCredentials() {
+            if (!confirm('Clear all saved session credentials?')) return;
             try {
                 await fetch('/api/config/clear', { method: 'POST' });
                 document.getElementById('inputGeminiKey').value = '';
                 document.getElementById('inputTavilyKey').value = '';
                 await initHealthAndCredentials();
+                await refreshDiagnostics();
                 showBanner('keyFeedbackBanner', '🗑️ Server session cleared. The platform will revert to server environment keys if available.', 'info');
             } catch (e) {
                 alert('Failed to clear credentials: ' + e.message);
@@ -1048,6 +1328,7 @@ HTML_LANDING_PAGE = """<!DOCTYPE html>
 
         // Initialize credentials and health check on page load
         initHealthAndCredentials();
+        refreshDiagnostics();
     </script>
 </body>
 </html>
@@ -1229,8 +1510,119 @@ def app(environ, start_response):
             "request_id": request_id
         })
 
-    # 4. CREDENTIAL VALIDATION & SESSION ENCRYPTION (/api/config/validate, /api/config/gemini, /api/config/tavily, /api/keys/test)
-    if path in ("/api/config/validate", "/api/config/gemini", "/api/config/tavily", "/api/keys/test") and method == "POST":
+    # 4A. GEMINI INDEPENDENT CONFIGURATION (/api/config/gemini)
+    if path == "/api/config/gemini" and method == "POST":
+        content_type = environ.get("CONTENT_TYPE", "")
+        if "application/json" not in content_type:
+            return send_json({"success": False, "error": "Content-Type must be application/json", "request_id": request_id}, status="415 Unsupported Media Type")
+
+        try:
+            content_length = int(environ.get("CONTENT_LENGTH", 0))
+            if content_length > MAX_REQUEST_BODY_SIZE:
+                return send_json({"success": False, "error": "Request body exceeds maximum allowed size (64 KB)", "request_id": request_id}, status="413 Payload Too Large")
+            body_bytes = environ["wsgi.input"].read(content_length) if content_length > 0 else b"{}"
+            body = json.loads(body_bytes.decode("utf-8")) if body_bytes else {}
+        except Exception:
+            return send_json({"success": False, "error": "Invalid JSON payload", "request_id": request_id}, status="400 Bad Request")
+
+        action = body.get("action", "save").lower()
+        is_https = environ.get("wsgi.url_scheme", "https") == "https"
+
+        if action in ("delete", "remove", "clear"):
+            new_token = encrypt_user_credentials(gemini_key="", tavily_key=user_tavily_key, user_id=user_id)
+            return send_json({
+                "success": True,
+                "message": "Google Gemini API key removed from secure session.",
+                "gemini_valid": False,
+                "request_id": request_id
+            }, extra_headers=[("Set-Cookie", build_session_cookie(new_token, secure=is_https))])
+
+        raw_key = clean_api_key(body.get("gemini_api_key") or body.get("gemini_key") or user_gemini_key or "")
+        model = body.get("model", DEFAULT_GEMINI_MODEL)
+
+        if not raw_key:
+            return send_json({
+                "success": False,
+                "error": "Google Gemini API key is required. Please paste your key from Google AI Studio.",
+                "request_id": request_id
+            }, status="400 Bad Request")
+
+        try:
+            probe_result = GeminiClient.test_connection(api_key=raw_key, model=model)
+            if not probe_result.get("success"):
+                return send_json({
+                    "success": False,
+                    "error": probe_result.get("message", "Gemini authentication failed. Please verify that your key is active and correct in Google AI Studio."),
+                    "provider": "google_gemini",
+                    "request_id": request_id
+                }, status="400 Bad Request")
+        except Exception as e:
+            return send_json({
+                "success": False,
+                "error": str(classify_error(e)),
+                "provider": "google_gemini",
+                "request_id": request_id
+            }, status="400 Bad Request")
+
+        new_token = encrypt_user_credentials(gemini_key=raw_key, tavily_key=user_tavily_key, user_id=user_id)
+        return send_json({
+            "success": True,
+            "message": "Google Gemini API key verified and securely stored in encrypted session.",
+            "gemini_valid": True,
+            "session_active": True,
+            "request_id": request_id
+        }, extra_headers=[("Set-Cookie", build_session_cookie(new_token, secure=is_https))])
+
+    # 4B. TAVILY INDEPENDENT CONFIGURATION (/api/config/tavily)
+    if path == "/api/config/tavily" and method == "POST":
+        content_type = environ.get("CONTENT_TYPE", "")
+        if "application/json" not in content_type:
+            return send_json({"success": False, "error": "Content-Type must be application/json", "request_id": request_id}, status="415 Unsupported Media Type")
+
+        try:
+            content_length = int(environ.get("CONTENT_LENGTH", 0))
+            if content_length > MAX_REQUEST_BODY_SIZE:
+                return send_json({"success": False, "error": "Request body exceeds maximum allowed size (64 KB)", "request_id": request_id}, status="413 Payload Too Large")
+            body_bytes = environ["wsgi.input"].read(content_length) if content_length > 0 else b"{}"
+            body = json.loads(body_bytes.decode("utf-8")) if body_bytes else {}
+        except Exception:
+            return send_json({"success": False, "error": "Invalid JSON payload", "request_id": request_id}, status="400 Bad Request")
+
+        action = body.get("action", "save").lower()
+        is_https = environ.get("wsgi.url_scheme", "https") == "https"
+
+        if action in ("delete", "remove", "clear"):
+            new_token = encrypt_user_credentials(gemini_key=user_gemini_key, tavily_key="", user_id=user_id)
+            return send_json({
+                "success": True,
+                "message": "Tavily Search API key removed from session.",
+                "tavily_valid": False,
+                "request_id": request_id
+            }, extra_headers=[("Set-Cookie", build_session_cookie(new_token, secure=is_https))])
+
+        raw_key = clean_api_key(body.get("tavily_api_key") or body.get("tavily_key") or user_tavily_key or "")
+        tavily_ok, tavily_msg = test_tavily_key(raw_key)
+
+        if raw_key and not tavily_ok:
+            return send_json({
+                "success": False,
+                "error": tavily_msg,
+                "provider": "tavily",
+                "request_id": request_id
+            }, status="400 Bad Request")
+
+        new_token = encrypt_user_credentials(gemini_key=user_gemini_key, tavily_key=raw_key, user_id=user_id)
+        return send_json({
+            "success": True,
+            "message": "Tavily Search API key verified and securely stored in encrypted session.",
+            "tavily_valid": tavily_ok,
+            "tavily_status": tavily_msg,
+            "session_active": True,
+            "request_id": request_id
+        }, extra_headers=[("Set-Cookie", build_session_cookie(new_token, secure=is_https))])
+
+    # 4C. COMBINED CREDENTIAL VALIDATION & TEST (/api/config/validate, /api/keys/test)
+    if path in ("/api/config/validate", "/api/keys/test") and method == "POST":
         content_type = environ.get("CONTENT_TYPE", "")
         if "application/json" not in content_type:
             return send_json({"success": False, "error": "Content-Type must be application/json", "request_id": request_id}, status="415 Unsupported Media Type")
@@ -1244,7 +1636,6 @@ def app(environ, start_response):
         except Exception:
             return send_json({"success": False, "error": "Invalid JSON payload", "request_id": request_id}, status="400 Bad Request")
 
-        # Resolve candidate keys (merging newly submitted keys with existing session keys)
         input_gemini = clean_api_key(body.get("gemini_api_key") or body.get("gemini_key") or "")
         input_tavily = clean_api_key(body.get("tavily_api_key") or body.get("tavily_key") or "")
         model = body.get("model", DEFAULT_GEMINI_MODEL)
@@ -1259,7 +1650,6 @@ def app(environ, start_response):
                 "request_id": request_id
             }, status="400 Bad Request")
 
-        # Live probe test with GeminiClient
         try:
             probe_result = GeminiClient.test_connection(api_key=effective_gemini, model=model)
             if not probe_result.get("success"):
@@ -1278,7 +1668,6 @@ def app(environ, start_response):
                 "request_id": request_id
             }, status="400 Bad Request")
 
-        # Optional Tavily validation
         tavily_ok, tavily_msg = test_tavily_key(effective_tavily)
         if effective_tavily and not tavily_ok:
             return send_json({
@@ -1288,7 +1677,6 @@ def app(environ, start_response):
                 "request_id": request_id
             }, status="400 Bad Request")
 
-        # Encrypt valid credentials into secure server-side session token
         session_token = encrypt_user_credentials(
             gemini_key=input_gemini or user_gemini_key,
             tavily_key=input_tavily or user_tavily_key,

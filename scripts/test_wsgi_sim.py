@@ -164,7 +164,59 @@ def run_tests():
     assert data["success"] is True
     print("  -> Passed!")
 
-    print("\nALL 15 SIMULATION TESTS PASSED!")
+    print("Testing 16: POST /api/config/gemini - Rejects invalid key")
+    status, headers, body = simulate_request(
+        "/api/config/gemini",
+        method="POST",
+        body=json.dumps({"gemini_api_key": "bad_key"}),
+        headers={"Content-Type": "application/json"}
+    )
+    assert "400" in status
+    data = json.loads(body.decode("utf-8"))
+    assert data["success"] is False
+    assert "error" in data
+    print("  -> Passed! (Invalid Gemini key rejected with 400)")
+
+    print("Testing 17: POST /api/config/gemini - Action delete clears Gemini key")
+    status, headers, body = simulate_request(
+        "/api/config/gemini",
+        method="POST",
+        body=json.dumps({"action": "delete"}),
+        headers={"Content-Type": "application/json"}
+    )
+    assert status == "200 OK"
+    data = json.loads(body.decode("utf-8"))
+    assert data["success"] is True
+    assert data["gemini_valid"] is False
+    print("  -> Passed! (Gemini deletion endpoint works)")
+
+    print("Testing 18: POST /api/config/tavily - Action delete clears Tavily key")
+    status, headers, body = simulate_request(
+        "/api/config/tavily",
+        method="POST",
+        body=json.dumps({"action": "delete"}),
+        headers={"Content-Type": "application/json"}
+    )
+    assert status == "200 OK"
+    data = json.loads(body.decode("utf-8"))
+    assert data["success"] is True
+    assert data["tavily_valid"] is False
+    print("  -> Passed! (Tavily deletion endpoint works)")
+
+    print("Testing 19: POST /api/jobs - Job queue endpoint")
+    status, headers, body = simulate_request(
+        "/api/jobs",
+        method="POST",
+        body=json.dumps({"topic": "Zero-Trust Architecture in Critical Cloud Healthcare", "gemini_api_key": "test_key"}),
+        headers={"Content-Type": "application/json"}
+    )
+    assert "202" in status
+    data = json.loads(body.decode("utf-8"))
+    assert data["success"] is True
+    assert "job_id" in data
+    print("  -> Passed! (Jobs endpoint returned 202 Accepted)")
+
+    print("\nALL 19 SIMULATION TESTS PASSED!")
 
 if __name__ == "__main__":
     run_tests()
